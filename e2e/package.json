@@ -1,0 +1,11 @@
+{
+  "name": "nostromo-e2e",
+  "private": true,
+  "description": "Browser test of the nostromo UI",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.49.1"
+  }
+}

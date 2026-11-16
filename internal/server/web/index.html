@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<meta name="color-scheme" content="dark light">
+<meta name="theme-color" content="#101114">
+<title>nostromo</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%23101114'/%3E%3Cpath d='M4 5l3 3-3 3M8 11h4' stroke='%2337d67a' stroke-width='1.6' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="vendor/xterm.css">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div id="app">
+  <aside id="drawer" aria-label="Chats">
+    <header class="drawer-head">
+      <div class="host">
+        <span id="host" class="host-name">…</span>
+        <select id="peers" class="peers" aria-label="Switch machine" hidden></select>
+      </div>
+      <button id="new-chat" class="btn primary" type="button">New chat</button>
+    </header>
+    <div id="update" class="update" hidden>
+      <span id="update-text"></span>
+      <button id="update-btn" class="btn small" type="button">Update</button>
+    </div>
+    <input id="filter" class="filter" type="search" placeholder="Filter by title or path" autocomplete="off" spellcheck="false">
+    <nav id="groups" class="groups"></nav>
+  </aside>
+  <div id="scrim" class="scrim" hidden></div>
+
+  <main id="main">
+    <header class="topbar">
+      <button id="menu-btn" class="icon-btn hamburger" type="button" aria-label="Show chats">
+        <svg viewBox="0 0 24 24" width="22" height="22"><path d="M3 6h18M3 12h18M3 18h18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      </button>
+      <button id="title" class="title" type="button" title="Rename"></button>
+      <span id="status" class="status-pill" hidden></span>
+      <div class="actions" id="actions" hidden>
+        <button id="act-stop" class="btn small" type="button">Stop</button>
+        <button id="act-rename" class="btn small" type="button">Rename</button>
+        <button id="act-delete" class="btn small danger" type="button">Delete</button>
+      </div>
+    </header>
+
+    <section id="view" class="view">
+      <div id="banner" class="banner" hidden>
+        <span id="banner-text"></span>
+        <span class="banner-actions">
+          <button id="banner-resume" class="btn small primary" type="button">Resume</button>
+          <button id="banner-delete" class="btn small danger" type="button">Delete</button>
+        </span>
+      </div>
+      <div id="terminal" class="terminal" hidden></div>
+      <div id="empty" class="empty">
+        <div class="empty-card">
+          <h1 id="empty-title">No chat selected</h1>
+          <p id="empty-sub" class="muted">Pick a chat on the left or start a new one.</p>
+          <p id="empty-meta" class="muted small"></p>
+          <div class="empty-actions">
+            <button id="empty-resume" class="btn primary" type="button" hidden>Resume</button>
+            <button id="empty-delete" class="btn danger" type="button" hidden>Delete</button>
+            <button id="empty-new" class="btn primary" type="button">New chat</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <footer id="mobile-input" class="mobile-input" hidden>
+      <div class="keybar" id="keybar">
+        <button type="button" data-key="esc">Esc</button>
+        <button type="button" data-key="tab">Tab</button>
+        <button type="button" data-key="stab">⇧Tab</button>
+        <button type="button" data-key="ctrlc">^C</button>
+        <button type="button" data-key="left" aria-label="Left">←</button>
+        <button type="button" data-key="up" aria-label="Up">↑</button>
+        <button type="button" data-key="down" aria-label="Down">↓</button>
+        <button type="button" data-key="right" aria-label="Right">→</button>
+        <button type="button" data-key="enter">⏎</button>
+        <button type="button" data-scroll="up" aria-label="Scroll up">⇞</button>
+        <button type="button" data-scroll="down" aria-label="Scroll down">⇟</button>
+      </div>
+      <form id="line-form" class="line">
+        <input id="line" type="text" enterkeyhint="send" placeholder="Type a message" autocomplete="off">
+        <button class="btn primary" type="submit">Send</button>
+      </form>
+    </footer>
+  </main>
+</div>
+
+<dialog id="new-dialog" class="dialog">
+  <form method="dialog" id="new-form">
+    <h2>New chat</h2>
+    <label id="agent-row" class="row" hidden>Agent
+      <select id="agent-select"></select>
+    </label>
+    <label class="row">Directory
+      <input id="path-input" type="text" autocomplete="off" spellcheck="false" placeholder="/path/to/project">
+    </label>
+    <div id="recent" class="recent"></div>
+    <div class="browser">
+      <div class="browser-head">
+        <button id="dir-up" class="btn small" type="button" aria-label="Parent directory">..</button>
+        <span id="dir-path" class="dir-path"></span>
+        <label class="hidden-toggle"><input id="dir-all" type="checkbox"> hidden</label>
+      </div>
+      <ul id="dir-list" class="dir-list"></ul>
+    </div>
+    <p id="new-error" class="error" hidden></p>
+    <div class="dialog-actions">
+      <button value="cancel" class="btn" type="submit" formnovalidate>Cancel</button>
+      <button id="new-create" class="btn primary" type="button">Start chat</button>
+    </div>
+  </form>
+</dialog>
+
+<div id="toast" class="toast" hidden>
+  <span id="toast-text"></span>
+  <button id="toast-undo" class="btn small" type="button" hidden>Undo</button>
+</div>
+
+<script src="vendor/xterm.js"></script>
+<script src="vendor/addon-fit.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
