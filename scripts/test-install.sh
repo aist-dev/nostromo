@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Tests install.sh against a local HTTP server that mimics GitHub Releases:
-# a good release installs, a tampered release is refused.
+# a good release installs, a tampered release is refused, and install.sh --source,
+# uninstall.sh (with and without a working binary) and reinstalling all round-trip.
 #
 #   scripts/test-install.sh             checks run in a throwaway HOME on this machine
 #   scripts/test-install.sh --container checks run as a fresh user in a clean Ubuntu container (needs docker)
@@ -85,6 +86,56 @@ source_check() {
   echo "ok: install from source"
 }
 
+# cycle_check <home> <good-url>: install, uninstall, reinstall, purge, and the
+# fallback path of uninstall.sh when the binary is gone.
+cycle_check() {
+  local home="$1" good="$2" out alias_line settings
+  out="$(mktemp)"
+  alias_line="alias agent='claude --dangerously-skip-permissions'"
+  settings='{"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"guard.sh"}]}]},"theme":"dark"}'
+  mkdir -p "$home/.claude"
+  printf 'export A=1\n%s\n' "$alias_line" > "$home/.bashrc"
+  printf '%s\n' "$settings" > "$home/.claude/settings.json"
+  cp "$home/.bashrc" "$home/bashrc.orig"
+  sh_env() {
+    env -i HOME="$home" PATH="/usr/local/bin:/usr/bin:/bin" SHELL=/bin/bash USER="$(id -un)" \
+      NOSTROMO_SERVICE=none NOSTROMO_SETUP_ARGS="--no-service --no-tailscale" NOSTROMO_DOWNLOAD_URL="$good" "$@" > "$out" 2>&1
+  }
+  installed() {
+    [ "$(readlink "$home/.local/bin/agent")" = "$home/.nostromo/bin/agent" ] &&
+      grep -q '^# nostromo: disabled alias agent=' "$home/.bashrc" &&
+      grep -q '/.nostromo/bin/agent hook claude' "$home/.claude/settings.json"
+  }
+  removed() {
+    [ ! -e "$home/.local/bin/agent" ] &&
+      cmp -s "$home/.bashrc" "$home/bashrc.orig" &&
+      ! grep -q 'nostromo' "$home/.claude/settings.json" &&
+      grep -q 'guard.sh' "$home/.claude/settings.json"
+  }
+
+  sh_env bash "$root/install.sh" || { cat "$out"; fail "cycle: install"; }
+  installed || { cat "$out"; fail "cycle: not installed"; }
+  sh_env bash "$root/uninstall.sh" || { cat "$out"; fail "cycle: uninstall"; }
+  removed || { cat "$out"; cat "$home/.bashrc"; fail "cycle: not removed"; }
+  [ -x "$home/.nostromo/bin/agent" ] || fail "cycle: uninstall without --purge must keep ~/.nostromo"
+  echo "ok: install, uninstall (alias, hooks and command restored)"
+
+  sh_env bash "$root/install.sh" || { cat "$out"; fail "cycle: reinstall"; }
+  installed || fail "cycle: reinstall not installed"
+  sh_env bash "$root/uninstall.sh" --purge || { cat "$out"; fail "cycle: purge"; }
+  removed || fail "cycle: purge did not remove"
+  [ ! -e "$home/.nostromo" ] || fail "cycle: --purge must delete ~/.nostromo"
+  echo "ok: reinstall, uninstall --purge"
+
+  sh_env bash "$root/install.sh" || { cat "$out"; fail "cycle: third install"; }
+  rm -f "$home/.nostromo/bin/agent"
+  sh_env bash "$root/uninstall.sh" --purge || { cat "$out"; fail "cycle: fallback uninstall"; }
+  removed || { cat "$out"; cat "$home/.bashrc"; cat "$home/.claude/settings.json"; fail "cycle: fallback did not remove"; }
+  [ ! -e "$home/.nostromo" ] || fail "cycle: fallback --purge must delete ~/.nostromo"
+  echo "ok: uninstall.sh without a working binary"
+  rm -f "$out"
+}
+
 main() {
   if [ "${1:-}" = "--inside" ]; then
     checks "$2" "$3" "$HOME/install-test"
@@ -112,6 +163,7 @@ main() {
   if [ "$container" = 0 ]; then
     checks "$good" "$bad" "$tmp/home"
     source_check "$tmp/source-home"
+    cycle_check "$tmp/cycle-home" "$good"
     return
   fi
   command -v docker >/dev/null || fail "docker is required for --container"

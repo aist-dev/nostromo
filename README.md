@@ -142,7 +142,15 @@ agent uninstall            # remove service, tailscale serve config, hooks, comm
 agent uninstall --purge    # also delete ~/.nostromo with all chat records
 ```
 
-`uninstall` restores an `agent` alias that setup disabled. Running tmux sessions are left alone.
+From a clone of the repository the same is available as a script, which also works when the installed binary is missing or broken:
+
+```sh
+./uninstall.sh                     # same as agent uninstall
+./uninstall.sh --purge             # also delete ~/.nostromo
+./uninstall.sh --kill-chats        # also end every running chat
+```
+
+Uninstalling restores an `agent` alias that setup disabled, so in a new terminal `agent` is your old command again. Running chats are left alone unless `--kill-chats` is given. `./install.sh --source` and `./uninstall.sh` can be run back and forth as often as you like.
 
 ## Security
 
