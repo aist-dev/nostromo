@@ -113,7 +113,7 @@ func FakeRuns(home string) []FakeRun {
 
 // CapturePane returns the visible text of a session's pane.
 func CapturePane(c *tmux.Client, session string) string {
-	args := append(c.BaseArgs(), "capture-pane", "-p", "-t", "="+session+":")
+	args := append(c.BaseArgs(), "capture-pane", "-p", "-S", "-", "-t", "="+session+":")
 	out, _ := exec.Command("tmux", args...).Output()
 	return string(out)
 }
@@ -126,4 +126,43 @@ func SendKeys(c *tmux.Client, session, text string) error {
 	}
 	args = append(c.BaseArgs(), "send-keys", "-t", "="+session+":", "Enter")
 	return exec.Command("tmux", args...).Run()
+}
+
+var (
+	agentOnce sync.Once
+	agentPath string
+	agentErr  error
+	agentOut  []byte
+)
+
+// AgentBinary builds ./cmd/agent once per test binary and returns its path.
+func AgentBinary(t testing.TB) string {
+	t.Helper()
+	agentOnce.Do(func() {
+		dir, err := os.MkdirTemp("", "nostromo-agent-")
+		if err != nil {
+			agentErr = err
+			return
+		}
+		agentPath = filepath.Join(dir, "agent")
+		cmd := exec.Command("go", "build", "-ldflags", "-X github.com/aist-dev/nostromo/internal/version.Version=0.0.1-test", "-o", agentPath, "./cmd/agent")
+		cmd.Dir = RepoRoot()
+		agentOut, agentErr = cmd.CombinedOutput()
+	})
+	if agentErr != nil {
+		t.Fatalf("build agent: %v\n%s", agentErr, agentOut)
+	}
+	return agentPath
+}
+
+// FakeConfig returns a config.toml body whose default agent is the fake agent.
+func FakeConfig(fakeAgent, socket string) string {
+	q := "'" + fakeAgent + "'"
+	return "tmux_socket = \"" + socket + "\"\n" +
+		"default_agent = \"fake\"\n" +
+		"check_updates = false\n" +
+		"[agents.fake]\n" +
+		"start = \"" + q + " --session-id {id}\"\n" +
+		"resume = \"" + q + " --resume {resume_id}\"\n" +
+		"shell_wrap = false\n"
 }

@@ -238,10 +238,13 @@ type Pane struct {
 	DeadStatus int
 	Attached   int
 	PID        int
+	// Unreaped is a dead pane whose process tmux has not collected yet, so its
+	// exit status is unknown.
+	Unreaped bool
 }
 
 // PanesFormat is the -F format for ListPanes; fields are tab separated.
-const PanesFormat = "#{session_name}\t#{" + ChatOption + "}\t#{pane_dead}\t#{pane_dead_status}\t#{session_attached}\t#{pane_pid}"
+const PanesFormat = "#{session_name}\t#{" + ChatOption + "}\t#{pane_dead}\t#{pane_dead_status}\t#{session_attached}\t#{pane_pid}\t#{pane_dead_signal}"
 
 // ParsePanes parses ListPanes output. Malformed lines are skipped.
 func ParsePanes(out string) []Pane {
@@ -257,13 +260,46 @@ func ParsePanes(out string) []Pane {
 		status, _ := strconv.Atoi(f[3])
 		attached, _ := strconv.Atoi(f[4])
 		pid, _ := strconv.Atoi(f[5])
-		panes = append(panes, Pane{Session: f[0], ChatID: f[1], Dead: f[2] == "1", DeadStatus: status, Attached: attached, PID: pid})
+		p := Pane{Session: f[0], ChatID: f[1], Dead: f[2] == "1", DeadStatus: status, Attached: attached, PID: pid}
+		signal := ""
+		if len(f) > 6 {
+			signal = f[6]
+		}
+		if p.Dead && f[3] == "" {
+			if sig, err := strconv.Atoi(signal); err == nil && sig > 0 {
+				p.DeadStatus = 128 + sig
+			} else {
+				p.Unreaped = true
+			}
+		}
+		panes = append(panes, p)
 	}
 	return panes
 }
 
 // ListPanes lists every pane on the server. No server running means no panes.
+//
+// tmux occasionally misses SIGCHLD for a pane whose process exited: the pane is
+// dead but the process stays a zombie with no exit status, so remain-on-exit
+// cannot tell success from failure. Running a short job makes the server handle
+// SIGCHLD again, which reaps every zombie; then the panes are listed once more.
 func (c *Client) ListPanes(ctx context.Context) ([]Pane, error) {
+	panes, err := c.listPanes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, p := range panes {
+		if p.Unreaped {
+			if _, err := c.run(ctx, "run-shell", "true"); err != nil && !noServer(err) {
+				return panes, nil
+			}
+			return c.listPanes(ctx)
+		}
+	}
+	return panes, nil
+}
+
+func (c *Client) listPanes(ctx context.Context) ([]Pane, error) {
 	out, err := c.run(ctx, "list-panes", "-a", "-F", PanesFormat)
 	if err != nil {
 		if noServer(err) {

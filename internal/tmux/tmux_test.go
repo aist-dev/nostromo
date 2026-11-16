@@ -136,10 +136,17 @@ func TestNewSession(t *testing.T) {
 }
 
 func TestParsePanes(t *testing.T) {
-	out := "agent-1\tid-1\t0\t\t1\t100\nagent-2\tid-2\t1\t3\t0\t200\nmine\t\t0\t\t0\t300\nshort\tline\n\n"
+	out := "agent-1\tid-1\t0\t\t1\t100\t\nagent-2\tid-2\t1\t3\t0\t200\t\nmine\t\t0\t\t0\t300\nshort\tline\n\n" +
+		"agent-3\tid-3\t1\t\t0\t400\t9\nagent-4\tid-4\t1\t\t0\t500\t\n"
 	p := ParsePanes(out)
-	if len(p) != 3 {
+	if len(p) != 5 {
 		t.Fatalf("%+v", p)
+	}
+	if p[3].DeadStatus != 137 || p[3].Unreaped {
+		t.Fatalf("signal: %+v", p[3])
+	}
+	if !p[4].Unreaped {
+		t.Fatalf("unreaped: %+v", p[4])
 	}
 	if p[0] != (Pane{Session: "agent-1", ChatID: "id-1", Attached: 1, PID: 100}) {
 		t.Fatalf("%+v", p[0])
@@ -169,6 +176,26 @@ func TestListPanes(t *testing.T) {
 	r.errs["list-panes"] = "something else"
 	if _, err := c.ListPanes(context.Background()); err == nil {
 		t.Fatal("other errors must propagate")
+	}
+}
+
+func TestListPanesReapsZombies(t *testing.T) {
+	c, r := newFake()
+	r.out["list-panes"] = "agent-1\tid\t1\t\t0\t1\t\n"
+	p, err := c.ListPanes(context.Background())
+	if err != nil || len(p) != 1 {
+		t.Fatalf("%v %v", p, err)
+	}
+	var subs []string
+	for _, cl := range r.calls {
+		subs = append(subs, cl.args[4])
+	}
+	if strings.Join(subs, ",") != "list-panes,run-shell,list-panes" {
+		t.Fatalf("calls: %v", subs)
+	}
+	r.errs["run-shell"] = "boom"
+	if p, err := c.ListPanes(context.Background()); err != nil || !p[0].Unreaped {
+		t.Fatalf("run-shell failure keeps the first listing: %v %v", p, err)
 	}
 }
 
