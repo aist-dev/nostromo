@@ -26,6 +26,7 @@ type fakeService struct {
 	running    bool
 	installErr error
 	lingerErr  error
+	restartErr error
 	restarts   int
 	spec       ServiceSpec
 	starts     []bool
@@ -47,7 +48,7 @@ func (f *fakeService) Install(_ context.Context, s ServiceSpec, start bool) (boo
 	}
 	return changed, nil
 }
-func (f *fakeService) Restart(context.Context) error { f.restarts++; return nil }
+func (f *fakeService) Restart(context.Context) error { f.restarts++; return f.restartErr }
 func (f *fakeService) Running(context.Context) bool  { return f.running }
 func (f *fakeService) Uninstall(context.Context) error {
 	f.installed, f.running = false, false
@@ -187,10 +188,15 @@ func TestSetupFresh(t *testing.T) {
 		t.Fatalf("nothing should be left:\n%s", out)
 	}
 
-	// A second run changes nothing and stays quiet about it.
+	// A second run changes nothing and stays quiet about it, but restarts the
+	// running service so it picks up the newly installed binary.
 	f.out.Reset()
+	restarts := f.svc.restarts
 	if err := f.in.Setup(context.Background(), Options{}); err != nil {
 		t.Fatal(err)
+	}
+	if f.svc.restarts != restarts+1 || !strings.Contains(f.out.String(), "restarted fake service") {
+		t.Fatalf("service not restarted on reinstall: %d\n%s", f.svc.restarts, f.out)
 	}
 	if len(f.ts.served) != 1 || strings.Count(read(t, rc), BlockStart) != 1 || !strings.Contains(f.out.String(), "already proxies") {
 		t.Fatalf("second run:\n%s", f.out)
@@ -362,6 +368,19 @@ func TestSetupStops(t *testing.T) {
 	f.in.Paths.Home = filepath.Join(f.home, "file")
 	if err := f.in.Setup(ctx, Options{}); err == nil {
 		t.Fatal("bad home")
+	}
+}
+
+func TestSetupRestartFailure(t *testing.T) {
+	f := newFixture(t)
+	f.in.Setup(context.Background(), Options{NoTailscale: true})
+	f.svc.restartErr = errors.New("busy")
+	f.out.Reset()
+	if err := f.in.Setup(context.Background(), Options{NoTailscale: true}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(f.out.String(), "restart fake service: busy") {
+		t.Fatal(f.out.String())
 	}
 }
 

@@ -84,7 +84,8 @@ func (in *Installer) target(cfg config.Config) string {
 func (in *Installer) Setup(ctx context.Context, o Options) error {
 	r := &report{out: in.Out}
 	r.step("Files")
-	if err := in.files(o, r); err != nil {
+	newBinary, err := in.files(o, r)
+	if err != nil {
 		return err
 	}
 	cfg, err := config.Load(in.Paths.Config())
@@ -120,7 +121,7 @@ func (in *Installer) Setup(ctx context.Context, o Options) error {
 	serviceUp := false
 	if !o.NoService {
 		r.step("Service")
-		serviceUp = in.service(ctx, o, r)
+		serviceUp = in.service(ctx, o, newBinary, r)
 	}
 	if serviceUp && !o.Upgrade {
 		in.waitHealthy(ctx, cfg, r)
@@ -147,33 +148,36 @@ func (in *Installer) Setup(ctx context.Context, o Options) error {
 	return nil
 }
 
-func (in *Installer) files(o Options, r *report) error {
+// files creates the home directory and installs the running binary. It reports
+// whether the installed binary is new since the service last started, which is
+// always the case when setup runs from it (install.sh puts it in place first).
+func (in *Installer) files(o Options, r *report) (bool, error) {
 	for _, d := range []string{in.Paths.Bin(), in.Paths.Chats(), in.Paths.Logs()} {
 		if err := os.MkdirAll(d, 0o700); err != nil {
-			return err
+			return false, err
 		}
 	}
 	if _, err := os.Stat(in.Paths.Config()); errors.Is(err, os.ErrNotExist) {
 		if err := config.WriteFileAtomic(in.Paths.Config(), []byte(config.DefaultFile), 0o644); err != nil {
-			return err
+			return false, err
 		}
 		r.ok("wrote %s", in.Paths.Config())
 	}
 	if _, err := writeIfChanged(in.Paths.TmuxConf(), tmux.Conf); err != nil {
-		return err
+		return false, err
 	}
 	if !o.Upgrade && in.Exe != "" && in.Exe != in.Paths.Binary() {
 		data, err := os.ReadFile(in.Exe)
 		if err != nil {
-			return err
+			return false, err
 		}
 		if err := config.WriteFileAtomic(in.Paths.Binary(), data, 0o755); err != nil {
-			return err
+			return false, err
 		}
 		r.ok("installed %s", in.Paths.Binary())
 	}
 	r.ok("%s", in.Paths.Home)
-	return nil
+	return !o.Upgrade, nil
 }
 
 func (in *Installer) command(r *report) error {
@@ -315,7 +319,8 @@ func envOr(k, def string) string {
 	return def
 }
 
-func (in *Installer) service(ctx context.Context, o Options, r *report) bool {
+func (in *Installer) service(ctx context.Context, o Options, newBinary bool, r *report) bool {
+	wasRunning := in.Service != nil && in.Service.Running(ctx)
 	if in.Service == nil {
 		r.warn("no supported service manager on %s", in.GOOS)
 		r.need("run \"agent serve\" in the background yourself")
@@ -331,6 +336,16 @@ func (in *Installer) service(ctx context.Context, o Options, r *report) bool {
 		r.ok("%s written to %s", in.Service.Name(), in.Service.Path())
 	} else {
 		r.ok("%s up to date", in.Service.Name())
+	}
+	// A running service still runs the old binary until it restarts. (On upgrade,
+	// agent update restarts it after setup.)
+	if wasRunning && newBinary && !changed {
+		if err := in.Service.Restart(ctx); err != nil {
+			r.warn("restart %s: %v", in.Service.Name(), err)
+			r.need("restart the service: " + in.Service.RestartCommand())
+		} else {
+			r.ok("restarted %s with the new binary", in.Service.Name())
+		}
 	}
 	if !o.Upgrade && in.GOOS == "linux" {
 		if err := in.Service.EnableLinger(ctx); err != nil {
