@@ -22,6 +22,14 @@ func (in *Installer) Uninstall(ctx context.Context, purge bool) error {
 		} else {
 			r.ok("removed %s", in.Service.Name())
 		}
+		if _, err := os.Stat(in.lingerMarker()); err == nil {
+			if err := in.Service.DisableLinger(ctx); err != nil {
+				r.warn("linger: %v (turn it off with: loginctl disable-linger %s)", err, in.User)
+			} else {
+				os.Remove(in.lingerMarker())
+				r.ok("turned linger off again (setup had turned it on)")
+			}
+		}
 	}
 	if in.Tailscale != nil {
 		if sc, err := in.Tailscale.ServeStatus(ctx); err == nil {

@@ -82,16 +82,66 @@ func writeSettings(path string, o *object, existed bool) error {
 	return config.WriteFileAtomic(path, data, mode)
 }
 
-// eventGroups reads hooks.<event> as a list of matcher groups.
-func eventGroups(raw json.RawMessage) ([]map[string]json.RawMessage, error) {
-	var groups []map[string]json.RawMessage
+// The hook groups of one event, kept as ordered objects with raw values, so other
+// tools' entries are written back byte for byte (apart from indentation).
+type group struct {
+	obj     *object
+	entries []json.RawMessage
+	ok      bool // the "hooks" field is an array we understand
+}
+
+func parseGroups(raw json.RawMessage) ([]*group, error) {
 	if len(raw) == 0 {
 		return nil, nil
 	}
-	if err := json.Unmarshal(raw, &groups); err != nil {
+	var items []json.RawMessage
+	if err := json.Unmarshal(raw, &items); err != nil {
 		return nil, err
 	}
+	groups := make([]*group, 0, len(items))
+	for _, it := range items {
+		obj, err := parseObject(it)
+		if err != nil {
+			return nil, err
+		}
+		g := &group{obj: obj}
+		if h, ok := obj.get("hooks"); ok && json.Unmarshal(h, &g.entries) == nil {
+			g.ok = true
+		}
+		groups = append(groups, g)
+	}
 	return groups, nil
+}
+
+func marshalArray(items []json.RawMessage) json.RawMessage {
+	var b []byte
+	b = append(b, '[')
+	for i, it := range items {
+		if i > 0 {
+			b = append(b, ',')
+		}
+		b = append(b, it...)
+	}
+	return append(b, ']')
+}
+
+func marshalGroups(groups []*group) json.RawMessage {
+	items := make([]json.RawMessage, len(groups))
+	for i, g := range groups {
+		if g.ok {
+			g.obj.set("hooks", marshalArray(g.entries))
+		}
+		items[i] = g.obj.marshal()
+	}
+	return marshalArray(items)
+}
+
+func entryCommand(e json.RawMessage) string {
+	var v struct {
+		Command string `json:"command"`
+	}
+	json.Unmarshal(e, &v)
+	return v.Command
 }
 
 // InstallClaudeHooks merges nostromo's hooks into a Claude Code settings file.
@@ -112,43 +162,47 @@ func InstallClaudeHooks(path, binary string) (bool, error) {
 	changed := false
 	for _, ev := range ClaudeHookEvents {
 		raw, _ := hooks.get(ev)
-		groups, err := eventGroups(raw)
+		groups, err := parseGroups(raw)
 		if err != nil {
 			return false, fmt.Errorf("%w: %s: hooks.%s has an unexpected shape", ErrInvalidSettings, path, ev)
 		}
 		found := false
-		for gi, g := range groups {
-			var entries []map[string]any
-			if json.Unmarshal(g["hooks"], &entries) != nil {
-				continue
-			}
-			for ei, e := range entries {
-				cmd, _ := e["command"].(string)
+		for _, g := range groups {
+			for i, e := range g.entries {
+				cmd := entryCommand(e)
 				if !isOurHook(cmd, "claude") {
 					continue
 				}
 				found = true
 				if cmd != want {
-					entries[ei]["command"] = want
-					b, _ := json.Marshal(entries)
-					groups[gi]["hooks"] = b
+					entry, _ := parseObject(e)
+					c, _ := json.Marshal(want)
+					entry.set("command", c)
+					g.entries[i] = entry.marshal()
 					changed = true
 				}
 			}
 		}
 		if !found {
-			entry, _ := json.Marshal([]hookEntry{{Type: "command", Command: want, Timeout: 5}})
-			groups = append(groups, map[string]json.RawMessage{"hooks": entry})
+			entry, _ := json.Marshal(map[string]any{"hooks": []hookEntry{{Type: "command", Command: want, Timeout: 5}}})
+			obj, _ := parseObject(entry)
+			g := &group{obj: obj, ok: true}
+			json.Unmarshal(mustGet(obj, "hooks"), &g.entries)
+			groups = append(groups, g)
 			changed = true
 		}
-		b, _ := json.Marshal(groups)
-		hooks.set(ev, b)
+		hooks.set(ev, marshalGroups(groups))
 	}
 	if !changed {
 		return false, nil
 	}
 	o.set("hooks", hooks.marshal())
 	return true, writeSettings(path, o, existed)
+}
+
+func mustGet(o *object, key string) json.RawMessage {
+	v, _ := o.get(key)
+	return v
 }
 
 // RemoveClaudeHooks deletes nostromo's hooks from a settings file, leaving everything else.
@@ -168,38 +222,39 @@ func RemoveClaudeHooks(path string) (bool, error) {
 	changed := false
 	for _, ev := range append([]string{}, hooks.keys...) {
 		v, _ := hooks.get(ev)
-		groups, err := eventGroups(v)
+		groups, err := parseGroups(v)
 		if err != nil {
 			continue
 		}
-		var kept []map[string]json.RawMessage
+		var kept []*group
+		evChanged := false
 		for _, g := range groups {
-			var entries []map[string]any
-			if json.Unmarshal(g["hooks"], &entries) != nil {
+			if !g.ok {
 				kept = append(kept, g)
 				continue
 			}
-			var rest []map[string]any
-			for _, e := range entries {
-				cmd, _ := e["command"].(string)
-				if isOurHook(cmd, "claude") {
-					changed = true
+			var rest []json.RawMessage
+			for _, e := range g.entries {
+				if isOurHook(entryCommand(e), "claude") {
+					evChanged = true
 					continue
 				}
 				rest = append(rest, e)
 			}
-			if len(rest) == 0 {
+			if len(rest) == 0 && len(g.entries) > 0 {
 				continue
 			}
-			b, _ := json.Marshal(rest)
-			g["hooks"] = b
+			g.entries = rest
 			kept = append(kept, g)
 		}
+		if !evChanged {
+			continue
+		}
+		changed = true
 		if len(kept) == 0 {
 			hooks.del(ev)
 		} else {
-			b, _ := json.Marshal(kept)
-			hooks.set(ev, b)
+			hooks.set(ev, marshalGroups(kept))
 		}
 	}
 	if !changed {
@@ -229,13 +284,11 @@ func ClaudeHooksInstalled(path string) (bool, error) {
 	}
 	for _, ev := range ClaudeHookEvents {
 		v, _ := hooks.get(ev)
-		groups, _ := eventGroups(v)
+		groups, _ := parseGroups(v)
 		found := false
 		for _, g := range groups {
-			var entries []map[string]any
-			json.Unmarshal(g["hooks"], &entries)
-			for _, e := range entries {
-				if cmd, _ := e["command"].(string); isOurHook(cmd, "claude") {
+			for _, e := range g.entries {
+				if isOurHook(entryCommand(e), "claude") {
 					found = true
 				}
 			}

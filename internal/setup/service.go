@@ -113,8 +113,10 @@ type ServiceManager interface {
 	Restart(ctx context.Context) error
 	Running(ctx context.Context) bool
 	Uninstall(ctx context.Context) error
-	// EnableLinger makes the service start without a login (Linux only).
-	EnableLinger(ctx context.Context) error
+	// EnableLinger makes the service start without a login (Linux only). It
+	// reports whether it turned linger on (false when it was already on).
+	EnableLinger(ctx context.Context) (bool, error)
+	DisableLinger(ctx context.Context) error
 	RestartCommand() string
 }
 
@@ -186,12 +188,19 @@ func (m *Systemd) Uninstall(ctx context.Context) error {
 	return runCmd(ctx, m.Run, "systemctl", "--user", "daemon-reload")
 }
 
-func (m *Systemd) EnableLinger(ctx context.Context) error {
+func (m *Systemd) EnableLinger(ctx context.Context) (bool, error) {
 	out, _, err := m.Run.Run(ctx, "loginctl", "show-user", m.User, "--property=Linger")
 	if err == nil && strings.TrimSpace(string(out)) == "Linger=yes" {
-		return nil
+		return false, nil
 	}
-	return runCmd(ctx, m.Run, "loginctl", "enable-linger", m.User)
+	if err := runCmd(ctx, m.Run, "loginctl", "enable-linger", m.User); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (m *Systemd) DisableLinger(ctx context.Context) error {
+	return runCmd(ctx, m.Run, "loginctl", "disable-linger", m.User)
 }
 
 // Launchd manages a launchd user agent.
@@ -246,4 +255,5 @@ func (m *Launchd) Uninstall(ctx context.Context) error {
 	return nil
 }
 
-func (m *Launchd) EnableLinger(context.Context) error { return nil }
+func (m *Launchd) EnableLinger(context.Context) (bool, error) { return false, nil }
+func (m *Launchd) DisableLinger(context.Context) error        { return nil }

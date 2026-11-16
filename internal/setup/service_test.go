@@ -103,13 +103,21 @@ func TestSystemd(t *testing.T) {
 	}
 	r.out["loginctl show-user me --property=Linger"] = "Linger=yes\n"
 	r.calls = nil
-	if err := m.EnableLinger(ctx); err != nil || r.has("loginctl enable-linger") {
+	if enabled, err := m.EnableLinger(ctx); err != nil || enabled || r.has("loginctl enable-linger") {
 		t.Fatal("linger already on")
 	}
 	r.out["loginctl show-user me --property=Linger"] = "Linger=no\n"
-	if err := m.EnableLinger(ctx); err != nil || !r.has("loginctl enable-linger me") {
+	if enabled, err := m.EnableLinger(ctx); err != nil || !enabled || !r.has("loginctl enable-linger me") {
 		t.Fatal("linger")
 	}
+	if err := m.DisableLinger(ctx); err != nil || !r.has("loginctl disable-linger me") {
+		t.Fatal("disable linger")
+	}
+	r.fail["loginctl enable-linger"] = true
+	if _, err := m.EnableLinger(ctx); err == nil {
+		t.Fatal("enable-linger failure")
+	}
+	delete(r.fail, "loginctl enable-linger")
 	if err := m.Uninstall(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -173,7 +181,7 @@ func TestLaunchd(t *testing.T) {
 	if err := m.Restart(ctx); err != nil || !r.has("launchctl kickstart -k") {
 		t.Fatal("restart")
 	}
-	if err := m.EnableLinger(ctx); err != nil {
+	if enabled, err := m.EnableLinger(ctx); err != nil || enabled || m.DisableLinger(ctx) != nil {
 		t.Fatal("linger is a no-op")
 	}
 	if err := m.Uninstall(ctx); err != nil {

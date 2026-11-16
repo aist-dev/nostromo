@@ -27,6 +27,8 @@ type fakeService struct {
 	installErr error
 	lingerErr  error
 	restartErr error
+	disableErr error
+	linger     bool
 	restarts   int
 	spec       ServiceSpec
 	starts     []bool
@@ -54,7 +56,18 @@ func (f *fakeService) Uninstall(context.Context) error {
 	f.installed, f.running = false, false
 	return nil
 }
-func (f *fakeService) EnableLinger(context.Context) error { return f.lingerErr }
+func (f *fakeService) EnableLinger(context.Context) (bool, error) {
+	if f.lingerErr != nil {
+		return false, f.lingerErr
+	}
+	enabled := !f.linger
+	f.linger = true
+	return enabled, nil
+}
+func (f *fakeService) DisableLinger(context.Context) error {
+	f.linger = false
+	return f.disableErr
+}
 
 type fakeTS struct {
 	status    tailscale.Status
@@ -499,6 +512,41 @@ func TestDoctorMoreFindings(t *testing.T) {
 	}
 	if restartFix(&Installer{}) != "restart agent serve" {
 		t.Fatal("restartFix")
+	}
+}
+
+func TestLingerRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	// Linger was off: setup turns it on, uninstall turns it off.
+	f := newFixture(t)
+	f.in.Setup(ctx, Options{NoTailscale: true})
+	if !f.svc.linger || !strings.Contains(f.out.String(), "linger enabled") {
+		t.Fatal(f.out.String())
+	}
+	f.out.Reset()
+	f.in.Uninstall(ctx, false)
+	if f.svc.linger || !strings.Contains(f.out.String(), "turned linger off") {
+		t.Fatal(f.out.String())
+	}
+	// Linger was already on: setup and uninstall leave it alone.
+	f = newFixture(t)
+	f.svc.linger = true
+	f.in.Setup(ctx, Options{NoTailscale: true})
+	if !strings.Contains(f.out.String(), "already on") {
+		t.Fatal(f.out.String())
+	}
+	f.in.Uninstall(ctx, false)
+	if !f.svc.linger {
+		t.Fatal("uninstall must not turn off linger it did not turn on")
+	}
+	// Disabling fails: reported with the command.
+	f = newFixture(t)
+	f.in.Setup(ctx, Options{NoTailscale: true})
+	f.svc.disableErr = errors.New("denied")
+	f.out.Reset()
+	f.in.Uninstall(ctx, false)
+	if !strings.Contains(f.out.String(), "loginctl disable-linger me") {
+		t.Fatal(f.out.String())
 	}
 }
 

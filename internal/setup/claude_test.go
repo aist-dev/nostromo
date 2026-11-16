@@ -248,3 +248,60 @@ func TestWriteSettingsErrors(t *testing.T) {
 		}
 	}
 }
+
+func TestInstallRemoveRoundTripIsByteExact(t *testing.T) {
+	orig := `{
+  "permissions": {
+    "defaultMode": "bypassPermissions"
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/guard.sh",
+            "statusMessage": "Checking..."
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo start",
+            "zeta": 1,
+            "alpha": 2
+          }
+        ]
+      }
+    ]
+  },
+  "model": "x"
+}
+`
+	p := settingsFile(t, orig)
+	if changed, err := InstallClaudeHooks(p, bin); err != nil || !changed {
+		t.Fatal(changed, err)
+	}
+	if changed, err := RemoveClaudeHooks(p); err != nil || !changed {
+		t.Fatal(changed, err)
+	}
+	if got, _ := os.ReadFile(p); string(got) != orig {
+		t.Fatalf("round trip changed the file:\n%s", got)
+	}
+}
+
+func TestMovedBinaryUpdatesOnlyOurEntry(t *testing.T) {
+	p := settingsFile(t, `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"/old/.nostromo/bin/agent hook claude","timeout":5,"z":1}]}]}}`)
+	if changed, err := InstallClaudeHooks(p, bin); err != nil || !changed {
+		t.Fatal(changed, err)
+	}
+	data, _ := os.ReadFile(p)
+	if !strings.Contains(string(data), bin+" hook claude") || strings.Contains(string(data), "/old/") || !strings.Contains(string(data), `"z": 1`) {
+		t.Fatalf("%s", data)
+	}
+}

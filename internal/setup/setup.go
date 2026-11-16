@@ -71,6 +71,11 @@ func (in *Installer) linkPath() string {
 	return filepath.Join(in.Home, ".local", "bin", name)
 }
 
+// lingerMarker exists when setup enabled linger for this user.
+func (in *Installer) lingerMarker() string {
+	return filepath.Join(in.Paths.Home, "linger-enabled-by-setup")
+}
+
 func (in *Installer) claudeSettings() string {
 	return filepath.Join(in.Home, ".claude", "settings.json")
 }
@@ -348,11 +353,17 @@ func (in *Installer) service(ctx context.Context, o Options, newBinary bool, r *
 		}
 	}
 	if !o.Upgrade && in.GOOS == "linux" {
-		if err := in.Service.EnableLinger(ctx); err != nil {
+		enabled, err := in.Service.EnableLinger(ctx)
+		switch {
+		case err != nil:
 			r.warn("cannot enable start at boot without login: %v", err)
 			r.need("let the service start at boot without a login: sudo loginctl enable-linger " + in.User)
-		} else {
-			r.ok("service starts at boot without a login (linger)")
+		case enabled:
+			// Remember that setup turned it on, so uninstall turns it off again.
+			os.WriteFile(in.lingerMarker(), nil, 0o600)
+			r.ok("service starts at boot without a login (linger enabled)")
+		default:
+			r.ok("service starts at boot without a login (linger was already on)")
 		}
 	}
 	return true

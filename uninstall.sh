@@ -84,6 +84,10 @@ fallback() {
         systemctl --user daemon-reload >/dev/null 2>&1 || true
         say "  removed systemd service"
       fi
+      if [ -f "$home/linger-enabled-by-setup" ]; then
+        loginctl disable-linger "$(id -un)" >/dev/null 2>&1 && say "  turned linger off again (setup had turned it on)"
+        rm -f "$home/linger-enabled-by-setup"
+      fi
       ;;
     *:Darwin)
       launchctl bootout "gui/$(id -u)/com.nostromo.server" >/dev/null 2>&1 || true
