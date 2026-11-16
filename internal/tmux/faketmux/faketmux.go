@@ -27,6 +27,10 @@ type Fake struct {
 	Errs     map[string]error // per method name: Version, NewSession, ListPanes, KillSession, Scroll, SwitchClient
 	Switched []string
 	Scrolls  []string
+	// AttachCmd, when set, replaces the argv returned by AttachArgs.
+	AttachCmd []string
+	// Screen is returned by Capture.
+	Screen string
 }
 
 // New returns a fake reporting tmux 3.4.
@@ -113,6 +117,9 @@ func (f *Fake) Scroll(_ context.Context, name, dir string) error {
 
 // AttachArgs implements tmux.API.
 func (f *Fake) AttachArgs(name string) []string {
+	if f.AttachCmd != nil {
+		return f.AttachCmd
+	}
 	return []string{"tmux", "-L", "fake", "attach-session", "-t", "=" + name}
 }
 
@@ -148,4 +155,17 @@ func (f *Fake) Get(name string) (*Session, bool) {
 	defer f.mu.Unlock()
 	s, ok := f.Sessions[name]
 	return s, ok
+}
+
+// Capture implements tmux.API.
+func (f *Fake) Capture(_ context.Context, name string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("Capture"); err != nil {
+		return "", err
+	}
+	if _, ok := f.Sessions[name]; !ok {
+		return "", tmux.ErrNoSession
+	}
+	return f.Screen, nil
 }

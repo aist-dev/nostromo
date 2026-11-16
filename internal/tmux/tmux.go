@@ -81,6 +81,7 @@ type API interface {
 	Scroll(ctx context.Context, name, dir string) error
 	AttachArgs(name string) []string
 	SwitchClient(ctx context.Context, name string) error
+	Capture(ctx context.Context, name string) (string, error)
 }
 
 // Client talks to one tmux server, selected by socket name.
@@ -364,6 +365,22 @@ func (c *Client) Scroll(ctx context.Context, name, dir string) error {
 		return ErrNoSession
 	}
 	return err
+}
+
+// CaptureLines is how much history Capture returns.
+const CaptureLines = 2000
+
+// Capture returns the pane's history and screen with colors, as terminal output
+// (lines end with CRLF).
+func (c *Client) Capture(ctx context.Context, name string) (string, error) {
+	out, err := c.run(ctx, "capture-pane", "-p", "-e", "-J", "-S", "-"+strconv.Itoa(CaptureLines), "-t", "="+name+":")
+	if err != nil {
+		if noSession(err) {
+			return "", ErrNoSession
+		}
+		return "", err
+	}
+	return strings.ReplaceAll(strings.TrimRight(out, "\n"), "\n", "\r\n") + "\r\n", nil
 }
 
 // InsideSocket reports whether a $TMUX value refers to a server on the given socket name.

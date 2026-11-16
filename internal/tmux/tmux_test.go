@@ -292,3 +292,23 @@ func TestInsideSocket(t *testing.T) {
 		t.Fatal("other socket")
 	}
 }
+
+func TestCapture(t *testing.T) {
+	c, r := newFake()
+	r.out["capture-pane"] = "a\nb\n\n\n"
+	got, err := c.Capture(context.Background(), "agent-1")
+	if err != nil || got != "a\r\nb\r\n" {
+		t.Fatalf("%q %v", got, err)
+	}
+	if args := strings.Join(r.calls[0].args, " "); !strings.HasSuffix(args, "capture-pane -p -e -J -S -2000 -t =agent-1:") {
+		t.Fatal(args)
+	}
+	r.errs["capture-pane"] = "can't find session: agent-1"
+	if _, err := c.Capture(context.Background(), "agent-1"); !errors.Is(err, ErrNoSession) {
+		t.Fatal(err)
+	}
+	r.errs["capture-pane"] = "other"
+	if _, err := c.Capture(context.Background(), "agent-1"); err == nil || errors.Is(err, ErrNoSession) {
+		t.Fatal(err)
+	}
+}
