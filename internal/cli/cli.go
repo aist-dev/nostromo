@@ -126,7 +126,7 @@ const usage = `Usage:
   agent stop <id>                end a chat's tmux session, keep the record
   agent rm <id>                  end the session and delete the chat
   agent serve                    run the web server (started by the service)
-  agent setup | doctor | update | uninstall | version
+  agent doctor | update | uninstall | version
   agent hook <adapter>           internal: called by agent hooks
 
 <id> may be any unambiguous prefix of a chat id.

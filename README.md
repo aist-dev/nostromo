@@ -25,7 +25,7 @@ One static Go binary, no runtime dependencies besides tmux. Linux and macOS.
 curl -fsSL https://raw.githubusercontent.com/aist-dev/nostromo/main/install.sh | bash
 ```
 
-The script downloads the release for your OS and architecture, verifies its SHA-256 checksum, puts it in `~/.nostromo/bin/agent` and runs `agent setup`. `setup` is safe to run again at any time.
+The script downloads the release for your OS and architecture, verifies its SHA-256 checksum and sets everything up (see below). It is safe to run again at any time: that is also how you repair an installation.
 
 ### Install from source
 
@@ -37,16 +37,16 @@ cd nostromo
 ./install.sh --source
 ```
 
-This builds the checked-out code, installs it as `~/.nostromo/bin/agent` and runs `agent setup`, exactly like the one-line install. Run it again after `git pull` to install the new code.
+This builds the checked-out code and installs it exactly like the one-line install. Run it again after `git pull` to install the new code.
 
 Both ways call the new binary by its full path, so an existing `agent` alias does not get in the way. After the first install, open a new terminal: from then on `agent` is the new command (`agent doctor`, `agent ls`, ...).
 
-### What `agent setup` does
+### What the installer sets up
 
 1. Creates `~/.nostromo/` with `config.toml`, `tmux.conf`, `chats/` and `logs/`.
 2. Puts the `agent` command on `PATH` as the symlink `~/.local/bin/agent`, and adds `~/.local/bin` to `PATH` in your shell rc file if needed.
    - An existing shell alias named `agent` (for example `alias agent='claude --dangerously-skip-permissions'`) is commented out with the prefix `# nostromo: disabled `; a backup of the rc file is saved as `<file>.nostromo.bak`. The new command keeps the same permission level.
-   - If another *program* already occupies `~/.local/bin/agent`, setup stops. Remove that program, or install under another name: `NOSTROMO_CMD=ag agent setup`.
+   - If another *program* already occupies `~/.local/bin/agent`, setup stops. Remove that program, or install under another name: `curl -fsSL … | NOSTROMO_CMD=ag bash`.
 3. Checks tmux and the agent commands in a login shell.
 4. Adds two hooks to `~/.claude/settings.json` (`SessionStart`, `UserPromptSubmit`) that keep each chat's resume id current and title it from the first prompt. Other settings and hooks are preserved; a backup is saved as `settings.json.nostromo.bak`. The hooks do nothing for a plain `claude` started without `agent`.
 5. Installs and starts the background service: a systemd user unit `nostromo.service` on Linux (plus `loginctl enable-linger` so it starts at boot without a login), a launchd agent `com.nostromo.server` on macOS.
@@ -138,7 +138,7 @@ agent update --version v1.2.3
 agent update --rollback # go back to the previous version
 ```
 
-An update verifies the checksum, checks that the new binary reports the expected version, swaps it atomically, migrates data (`agent setup --upgrade`) and restarts the service. If the new server does not come up within 10 seconds, the previous binary is restored automatically. Running agents are never interrupted. The UI shows when an update is available and can start it.
+An update verifies the checksum, checks that the new binary reports the expected version, swaps it atomically, migrates data and restarts the service. If the new server does not come up within 10 seconds, the previous binary is restored automatically. Running agents are never interrupted. The UI shows when an update is available and can start it.
 
 ## Check and remove
 

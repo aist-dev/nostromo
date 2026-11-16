@@ -99,7 +99,7 @@ In a new terminal:
 6. Log out and back in (or reboot): the service is back after login, the chat shows as
    stopped, Resume continues the conversation.
 7. `agent uninstall`: the plist, the serve config, the hooks and the symlink are gone; the
-   alias is restored. Then `agent setup` again to leave the machine installed.
+   alias is restored. Then `./install.sh --source` again to leave the machine installed.
 
 ## 7. Results
 

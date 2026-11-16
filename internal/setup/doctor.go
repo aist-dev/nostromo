@@ -82,7 +82,7 @@ func (in *Installer) Checks(ctx context.Context) []Check {
 
 	link := in.linkPath()
 	if dest, err := os.Readlink(link); err != nil || dest != in.Paths.Binary() {
-		add("command", Fail, link+" does not point to "+in.Paths.Binary(), in.setupCmd())
+		add("command", Fail, link+" does not point to "+in.Paths.Binary(), reinstallHint())
 	} else {
 		add("command", Pass, link, "")
 	}
@@ -112,7 +112,7 @@ func (in *Installer) Checks(ctx context.Context) []Check {
 	in.checkTailscale(ctx, cfg, add)
 
 	if len(cfg.AllowedUsers) == 0 {
-		add("allowed_users", Warn, "empty: the UI only works on this machine", in.setupCmd()+" (fills in your Tailscale login), or edit "+in.Paths.Config())
+		add("allowed_users", Warn, "empty: the UI only works on this machine", "it is filled in by itself once the HTTPS address is set up; or edit "+in.Paths.Config())
 	} else {
 		add("allowed_users", Pass, strings.Join(cfg.AllowedUsers, ", "), "")
 	}
@@ -120,9 +120,9 @@ func (in *Installer) Checks(ctx context.Context) []Check {
 	for _, name := range cfg.AgentNames() {
 		if cfg.Agents[name].Hooks == "claude" {
 			if ok, err := ClaudeHooksInstalled(in.claudeSettings()); err != nil {
-				add("hooks", Warn, err.Error(), "fix the JSON, then: "+in.setupCmd())
+				add("hooks", Warn, err.Error(), "fix the JSON, then "+reinstallHint())
 			} else if !ok {
-				add("hooks", Warn, "Claude Code hooks missing: Resume may reopen a cleared conversation", in.setupCmd())
+				add("hooks", Warn, "Claude Code hooks missing: Resume may reopen a cleared conversation", reinstallHint())
 			} else {
 				add("hooks", Pass, "Claude Code hooks installed", "")
 			}
@@ -177,7 +177,7 @@ func (in *Installer) checkResolution(ctx context.Context, link string, add func(
 	case err != nil && out == "":
 		add("resolve", Warn, "\""+name+"\" not found in a login shell", "open a new terminal")
 	case strings.Contains(out, "alias"):
-		add("resolve", Fail, "\""+name+"\" is a shell alias: "+lastLine(out), "remove the alias from your shell rc file, or run: "+in.setupCmd())
+		add("resolve", Fail, "\""+name+"\" is a shell alias: "+lastLine(out), "remove the alias from your shell rc file, or "+reinstallHint())
 	case strings.Contains(out, "function"):
 		add("resolve", Fail, "\""+name+"\" is a shell function", "remove the function from your shell rc file")
 	case strings.Contains(out, link) || strings.Contains(out, in.Paths.Binary()):
@@ -214,7 +214,7 @@ func (in *Installer) checkTailscale(ctx context.Context, cfg config.Config, add 
 		}
 	}
 	if port == 0 {
-		add("serve", Warn, "tailscale serve does not proxy to "+target, in.setupCmd())
+		add("serve", Warn, "tailscale serve does not proxy to "+target, "the server sets it up by itself once Tailscale allows it; see "+in.Paths.ServerLog())
 		return
 	}
 	add("serve", Pass, fmt.Sprintf("https port %d -> %s", port, target), "")

@@ -14,7 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/aist-dev/nostromo/internal/adapter"
 	"github.com/aist-dev/nostromo/internal/config"
 	"github.com/aist-dev/nostromo/internal/tailscale"
 	"github.com/aist-dev/nostromo/internal/tmux"
@@ -83,12 +82,12 @@ func (in *Installer) lingerMarker() string {
 	return filepath.Join(in.Paths.Home, "linger-enabled-by-setup")
 }
 
-// setupCmd is the command that reruns setup. It uses the full path: right after
-// the first install, "agent" in an open terminal may still be an old alias or
-// not on PATH yet.
-func (in *Installer) setupCmd() string {
-	return adapter.ShellQuote(in.Paths.Binary()) + " setup"
-}
+// InstallCmd is the one way users install, repair or reinstall nostromo. Users
+// are never sent to "agent setup": "agent" is the command that starts Claude.
+const InstallCmd = "curl -fsSL https://raw.githubusercontent.com/aist-dev/nostromo/main/install.sh | bash"
+
+// reinstallHint tells the user how to repair the installation.
+func reinstallHint() string { return "run the installer again: " + InstallCmd }
 
 func (in *Installer) claudeSettings() string {
 	return filepath.Join(in.Home, ".claude", "settings.json")
@@ -232,11 +231,11 @@ func (in *Installer) command(r *report) error {
 	case fi.Mode()&os.ModeSymlink != 0:
 		dest, _ := os.Readlink(link)
 		if dest != in.Paths.Binary() {
-			return fmt.Errorf("%s points to %s, another program.\n  Remove it, or install under another name: NOSTROMO_CMD=ag %s", link, dest, in.setupCmd())
+			return fmt.Errorf("%s points to %s, another program.\n  Remove it, or install under another name by running the installer with NOSTROMO_CMD=ag", link, dest)
 		}
 		r.ok("%s -> %s", link, dest)
 	default:
-		return fmt.Errorf("%s is another program.\n  Remove it, or install under another name: NOSTROMO_CMD=ag %s", link, in.setupCmd())
+		return fmt.Errorf("%s is another program.\n  Remove it, or install under another name by running the installer with NOSTROMO_CMD=ag", link)
 	}
 	binDir := filepath.Dir(link)
 	if !inPath(in.PathEnv, binDir) {

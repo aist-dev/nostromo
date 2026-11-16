@@ -815,3 +815,26 @@ func TestNewInstaller(t *testing.T) {
 		t.Fatal("no home")
 	}
 }
+
+// Users are never sent to "agent setup": "agent" starts Claude, and repairs go
+// through the installer.
+func TestNoUserFacingSetupCommand(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(t)
+	f.ts.status.MagicDNSEnabled = false
+	f.ts.setErr = errors.New("Access denied")
+	f.svc.lingerErr = errors.New("denied")
+	write(t, filepath.Join(f.home, ".claude", "settings.json"), "{")
+	f.in.Setup(ctx, Options{})
+	RemoveClaudeHooks(filepath.Join(f.home, ".claude", "settings.json"))
+	f.sh.typ = "agent is aliased to `claude'"
+	f.svc.running = false
+	f.in.Doctor(ctx)
+	out := f.out.String()
+	if strings.Contains(out, "agent setup") || strings.Contains(out, "bin/agent setup") || strings.Contains(out, "then run:") {
+		t.Fatalf("user-facing output mentions setup:\n%s", out)
+	}
+	if !strings.Contains(out, InstallCmd) {
+		t.Fatalf("repairs must point to the installer:\n%s", out)
+	}
+}
