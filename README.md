@@ -80,14 +80,27 @@ After the first install, open a new terminal so the `PATH` change and the disabl
 
 ```sh
 agent                       # new chat in the current directory, attached
-agent -a codex              # another agent from the config
-agent --cwd ~/src/api --title "Fix retries" --detach
+agent --nostr-agent codex   # another agent from the config
+agent --nostr-cwd ~/src/api --nostr-title "Fix retries" --nostr-detach
+agent --model opus "Fix the failing test"   # everything else goes to the agent
 agent ls                    # chats by directory, with status
 agent attach 550e           # any unambiguous id prefix
 agent resume 550e           # restart a stopped chat with its conversation
 agent stop 550e             # end the tmux session, keep the chat
 agent rm 550e               # end the session and delete the chat
 ```
+
+### Arguments for the agent
+
+nostromo's own flags all start with `--nostr-` so they never collide with an agent's flags: `--nostr-agent <name>`, `--nostr-cwd <dir>`, `--nostr-title <text>` and `--nostr-detach` (print the chat id instead of attaching). They may appear anywhere and also take the `--nostr-x=value` form. Every other argument is passed to the agent's start command unchanged, as a separate argument, byte for byte: quotes, `$`, newlines and long texts arrive as typed. For Claude Code a positional argument is the first message, so a script can start a chat that gets to work at once:
+
+```sh
+id=$(agent --nostr-cwd ~/src/api --nostr-title "Nightly triage" --nostr-detach "Triage the open issues")
+```
+
+With `--nostr-detach` the only output is the chat id. Without `--nostr-title` the title comes from the first prompt, as for a prompt typed in the chat. `agent resume` does not pass the arguments again: the conversation continues where it stopped.
+
+Arguments that would break chat tracking or end the session at once are refused before anything starts (`deny_args` in the config). For Claude Code these are `--resume`/`-r`, `--continue`/`-c`, `--session-id`, `--fork-session`, `--from-pr`, `--print`/`-p`, `--help`, `--version`, `--bg`, and an argument that is exactly a Claude subcommand name (`update`, `purge`, `mcp`, ...), which Claude would run instead of a chat even after `--`.
 
 Detach from a chat with the tmux prefix `Ctrl-b d`; the agent keeps running. Running `agent` inside a chat switches to the new chat instead of nesting tmux.
 
@@ -121,13 +134,13 @@ allowed_users = []          # Tailscale logins allowed to use the UI; set by set
 peers = []                  # other machines shown in the UI switcher, e.g. ["mac-mini"]
 
 [agents.claude]
-start      = "claude --dangerously-skip-permissions --session-id {id}"
+start      = "claude --dangerously-skip-permissions --session-id {id} {args}"
 resume     = "claude --dangerously-skip-permissions --resume {resume_id}"
 hooks      = "claude"
 shell_wrap = true           # run through your login shell, so PATH and rc variables match a terminal
 ```
 
-Placeholders: `{id}` (chat id), `{resume_id}` (the agent's session id), `{cwd}`. Values are shell-quoted. A new CLI agent needs only a new `[agents.<name>]` block; check its documentation for the right start and resume commands. An agent that cannot take a session id at start can still resume with whatever it supports (for example "the last session in this directory").
+Placeholders: `{id}` (chat id), `{resume_id}` (the agent's session id), `{cwd}`, and in `start` only `{args}`, where the extra arguments of `agent ... <args>` go (a `start` without `{args}` gets them at the end; with no arguments it adds nothing). Values are shell-quoted. `deny_args` lists arguments a chat may not be started with: an entry starting with `-` is a flag (also matched as `--flag=value`, and a one-letter flag inside combined short flags), any other entry an argument that equals it. Built-in agents keep their default list unless the block sets its own (`deny_args = []` turns it off). A new CLI agent needs only a new `[agents.<name>]` block; check its documentation for the right start and resume commands. An agent that cannot take a session id at start can still resume with whatever it supports (for example "the last session in this directory").
 
 ## Updates
 

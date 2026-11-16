@@ -19,11 +19,70 @@ type Agent struct {
 	Resume    string `toml:"resume"`
 	Hooks     string `toml:"hooks"`
 	ShellWrap *bool  `toml:"shell_wrap"`
+	// DenyArgs are arguments the user may not pass through to the agent because
+	// they would break chat tracking or the terminal session. An entry starting
+	// with "-" is a flag (also matched as "--flag=value"; a one-letter flag is
+	// also matched inside combined short flags like "-xr"); any other entry
+	// matches an argument that equals it exactly, e.g. an agent subcommand.
+	DenyArgs []string `toml:"deny_args"`
 }
 
 // WrapInShell reports whether the agent command runs through the user's login shell.
 func (a Agent) WrapInShell() bool {
 	return a.ShellWrap == nil || *a.ShellWrap
+}
+
+// ArgsPlaceholder marks where pass-through arguments go in a start template.
+// A template without it gets them appended at the end.
+const ArgsPlaceholder = "{args}"
+
+// ClaudeDenyArgs are the Claude Code arguments a chat may not be started with:
+// session selection and one-shot modes (they would detach the record from the
+// conversation or end the session at once), and subcommands, which Claude runs
+// instead of a chat when they are the first positional argument.
+var ClaudeDenyArgs = []string{
+	"-r", "--resume", "-c", "--continue", "--session-id", "--fork-session", "--from-pr",
+	"-p", "--print", "-h", "--help", "-v", "--version", "--bg",
+	"agents", "attach", "auth", "auto-mode", "doctor", "gateway", "import", "install", "logs",
+	"mcp", "plugin", "plugins", "purge", "respawn", "rm", "setup-token", "stop", "kill",
+	"ultrareview", "update", "upgrade",
+}
+
+// CheckArgs returns an error naming the first argument that DenyArgs forbids.
+func (a Agent) CheckArgs(args []string) error {
+	for _, arg := range args {
+		for _, d := range a.DenyArgs {
+			if denied(arg, d) {
+				return fmt.Errorf("argument %q is not allowed: nostromo manages %s itself", arg, d)
+			}
+		}
+	}
+	return nil
+}
+
+func denied(arg, d string) bool {
+	if arg == d {
+		return true
+	}
+	if !strings.HasPrefix(d, "-") {
+		return false
+	}
+	if strings.HasPrefix(d, "--") {
+		return strings.HasPrefix(arg, d+"=")
+	}
+	// One-letter flag: -x also hides in "-yx" and "-xVALUE".
+	if len(d) != 2 || len(arg) < 2 || arg[0] != '-' || arg[1] == '-' {
+		return false
+	}
+	letters := arg[1:]
+	for i, c := range letters {
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z') {
+			// "-r5" style: only the leading letters are flags.
+			letters = letters[:i]
+			break
+		}
+	}
+	return strings.ContainsRune(letters, rune(d[1]))
 }
 
 // Config is the user configuration.
@@ -57,9 +116,10 @@ func Default() Config {
 		Peers:          []string{},
 		Agents: map[string]Agent{
 			"claude": {
-				Start:  "claude --dangerously-skip-permissions --session-id {id}",
-				Resume: "claude --dangerously-skip-permissions --resume {resume_id}",
-				Hooks:  "claude",
+				Start:    "claude --dangerously-skip-permissions --session-id {id} {args}",
+				Resume:   "claude --dangerously-skip-permissions --resume {resume_id}",
+				Hooks:    "claude",
+				DenyArgs: ClaudeDenyArgs,
 			},
 		},
 	}
@@ -78,8 +138,12 @@ tailscale_serve = true      # the server sets up the HTTPS address with tailscal
 allowed_users = []          # Tailscale logins allowed to use the UI ("*" = anyone in the tailnet); empty = this machine only
 peers = []                  # other machines for the UI switcher, e.g. ["mac-mini", "linux-box"]
 
+# start/resume placeholders: {id} {resume_id} {cwd}; {args} (start only) is where
+# extra arguments of "agent ... <args>" go, appended at the end when it is missing.
+# deny_args (optional) lists arguments that may not be passed; built-in agents
+# keep their default list unless the file sets one.
 [agents.claude]
-start      = "claude --dangerously-skip-permissions --session-id {id}"
+start      = "claude --dangerously-skip-permissions --session-id {id} {args}"
 resume     = "claude --dangerously-skip-permissions --resume {resume_id}"
 hooks      = "claude"
 shell_wrap = true
@@ -144,6 +208,9 @@ func merge(cfg *Config, file Config, md toml.MetaData) {
 		cfg.Peers = file.Peers
 	}
 	for name, a := range file.Agents {
+		if def, ok := cfg.Agents[name]; ok && !md.IsDefined("agents", name, "deny_args") {
+			a.DenyArgs = def.DenyArgs
+		}
 		cfg.Agents[name] = a
 	}
 }
@@ -151,7 +218,7 @@ func merge(cfg *Config, file Config, md toml.MetaData) {
 var placeholderRe = regexp.MustCompile(`\{([^{}]*)\}`)
 
 // Placeholders lists the substitutions allowed in agent command templates.
-var Placeholders = []string{"id", "resume_id", "cwd"}
+var Placeholders = []string{"id", "resume_id", "cwd", "args"}
 
 // ValidateTemplate checks that a command template only uses known placeholders.
 func ValidateTemplate(tmpl string) error {
@@ -187,6 +254,9 @@ func (c Config) Validate() error {
 		}
 		if err := ValidateTemplate(a.Resume); err != nil {
 			return fmt.Errorf("agents.%s.resume: %w", name, err)
+		}
+		if strings.Contains(a.Resume, ArgsPlaceholder) {
+			return fmt.Errorf("agents.%s.resume: %s is only allowed in start (a resumed chat does not get the start arguments again)", name, ArgsPlaceholder)
 		}
 	}
 	if _, ok := c.Agents[c.DefaultAgent]; !ok {

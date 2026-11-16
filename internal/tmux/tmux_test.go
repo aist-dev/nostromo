@@ -108,7 +108,7 @@ func TestBaseArgs(t *testing.T) {
 func TestNewSessionArgs(t *testing.T) {
 	args := NewSessionArgs(SessionSpec{Name: "agent-1234", ChatID: "1234-full", Cwd: "/a b", Command: "exec x", Env: []string{"A=1", "B=2"}})
 	got := strings.Join(args, "|")
-	want := "new-session|-d|-s|agent-1234|-c|/a b|-x|120|-y|40|-e|A=1|-e|B=2|exec x|;|set-option|-t|agent-1234|@nostromo_chat|1234-full|;|set-option|-w|-t|agent-1234|remain-on-exit|failed"
+	want := "new-session|-d|-s|agent-1234|-c|/a b|-x|120|-y|40|-e|A=1|-e|B=2|/bin/sh|-c|exec x|;|set-option|-t|agent-1234|@nostromo_chat|1234-full|;|set-option|-w|-t|agent-1234|remain-on-exit|failed"
 	if got != want {
 		t.Fatalf("\ngot  %s\nwant %s", got, want)
 	}

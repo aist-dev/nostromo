@@ -217,3 +217,43 @@ func TestPaths(t *testing.T) {
 		t.Fatal("expected error without HOME")
 	}
 }
+
+func TestCheckArgs(t *testing.T) {
+	a := Default().Agents["claude"]
+	for _, bad := range [][]string{
+		{"--resume"}, {"--resume=x"}, {"-r"}, {"-rabc"}, {"-dr"}, {"-c"}, {"--continue"},
+		{"--session-id", "x"}, {"--model", "opus", "-p"}, {"update"}, {"purge"}, {"--help"}, {"-h"},
+	} {
+		if err := a.CheckArgs(bad); err == nil {
+			t.Errorf("%q must be refused", bad)
+		}
+	}
+	for _, ok := range [][]string{
+		nil, {"--model", "opus"}, {"-d"}, {"fix the update script"}, {"--resumes"}, {"-"}, {"--"},
+		{"-9"}, {"привет"}, {"--add-dir", "/x"},
+	} {
+		if err := a.CheckArgs(ok); err != nil {
+			t.Errorf("%q: %v", ok, err)
+		}
+	}
+	if (Agent{}).CheckArgs([]string{"--resume"}) != nil {
+		t.Error("an agent without deny_args refuses nothing")
+	}
+}
+
+func TestDenyArgsInheritance(t *testing.T) {
+	cfg, err := Load(writeFile(t, "[agents.claude]\nstart = \"c {id}\"\nresume = \"c {resume_id}\"\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Agents["claude"].DenyArgs) != len(ClaudeDenyArgs) {
+		t.Fatal("a file without deny_args keeps the built-in list")
+	}
+	cfg, err = Load(writeFile(t, "[agents.claude]\nstart = \"c {id}\"\nresume = \"c {resume_id}\"\ndeny_args = []\n"))
+	if err != nil || len(cfg.Agents["claude"].DenyArgs) != 0 {
+		t.Fatalf("an explicit empty list wins: %v %v", err, cfg.Agents["claude"].DenyArgs)
+	}
+	if _, err := Load(writeFile(t, "[agents.x]\nstart = \"x {args}\"\nresume = \"x {args}\"\n")); err == nil {
+		t.Fatal("{args} in resume must be refused")
+	}
+}

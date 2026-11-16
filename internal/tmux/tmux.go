@@ -220,7 +220,9 @@ func NewSessionArgs(s SessionSpec) []string {
 	for _, e := range s.Env {
 		args = append(args, "-e", e)
 	}
-	args = append(args, s.Command,
+	// Several arguments make tmux exec the command directly, so /bin/sh parses
+	// it no matter what default-shell (the user's $SHELL) is.
+	args = append(args, "/bin/sh", "-c", s.Command,
 		";", "set-option", "-t", s.Name, ChatOption, s.ChatID,
 		";", "set-option", "-w", "-t", s.Name, "remain-on-exit", "failed",
 	)

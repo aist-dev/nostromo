@@ -299,3 +299,29 @@ func TestDefaults(t *testing.T) {
 		t.Fatal("defaults")
 	}
 }
+
+func TestStartArgsChecksAndCleanup(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	if _, err := e.svc.Start(ctx, StartOptions{Cwd: e.cwd, Args: []string{"--resume", "x"}}); !errors.Is(err, ErrDeniedArg) {
+		t.Fatalf("denied argument: %v", err)
+	}
+	if len(e.fake.Calls) != 0 {
+		t.Fatalf("a refused start must not touch tmux: %v", e.fake.Calls)
+	}
+	runDir := filepath.Join(e.svc.Paths.Home, "run", testID)
+	e.fake.Errs["NewSession"] = errors.New("boom")
+	if _, err := e.svc.Start(ctx, StartOptions{Cwd: e.cwd, Args: []string{"hi"}}); err == nil {
+		t.Fatal("tmux failure must fail the start")
+	}
+	if _, err := os.Stat(runDir); !os.IsNotExist(err) {
+		t.Fatalf("argument files must be removed after a failed start: %v", err)
+	}
+	delete(e.fake.Errs, "NewSession")
+	os.MkdirAll(e.svc.Paths.Home, 0o700)
+	os.RemoveAll(filepath.Join(e.svc.Paths.Home, "run"))
+	os.WriteFile(filepath.Join(e.svc.Paths.Home, "run"), nil, 0o600) // a file blocks the directory
+	if _, err := e.svc.Start(ctx, StartOptions{Cwd: e.cwd, Args: []string{"hi"}}); err == nil || !strings.Contains(err.Error(), "arguments") {
+		t.Fatalf("unwritable argument dir: %v", err)
+	}
+}

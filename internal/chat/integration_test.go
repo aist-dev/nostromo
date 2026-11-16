@@ -32,7 +32,7 @@ func newRig(t *testing.T, shellWrap bool) *rig {
 	fake := adapter.ShellQuote(testutil.FakeAgent(t))
 	cfg := config.Default()
 	wrap := shellWrap
-	cfg.Agents["fake"] = config.Agent{Start: fake + " --session-id {id}", Resume: fake + " --resume {resume_id}", ShellWrap: &wrap}
+	cfg.Agents["fake"] = config.Agent{Start: fake + " --session-id {id} {args}", Resume: fake + " --resume {resume_id}", ShellWrap: &wrap}
 	cfg.Agents["missing"] = config.Agent{Start: "/nonexistent/agent-binary {id}", Resume: "/nonexistent/agent-binary {resume_id}", ShellWrap: &wrap}
 	cfg.DefaultAgent = "fake"
 	paths := config.Paths{Home: home}
@@ -182,5 +182,33 @@ func TestResumeAndReboot(t *testing.T) {
 	r.waitStatus(t, rec.ID, state.Stopped)
 	if err := r.svc.Delete(ctx, rec.ID); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Pass-through arguments reach the agent as separate arguments, byte for byte,
+// with and without the login-shell wrapper; without any there is no extra one.
+func TestStartArgs(t *testing.T) {
+	want := []string{"--model", "x y", "it's \"q\" $HOME $(id) `id` ; && | \\ \\\\ \n2nd line кириллица 🚀", "--help", strings.Repeat("ab'\\", 2000)}
+	for _, wrap := range []bool{false, true} {
+		r := newRig(t, wrap)
+		rec, err := r.svc.Start(context.Background(), chat.StartOptions{Cwd: r.home, Args: want})
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := r.waitRuns(t, 1)[0].Args
+		if len(got) != 2+len(want) || got[1] != rec.ID {
+			t.Fatalf("wrap=%v: %q", wrap, got)
+		}
+		for i, w := range want {
+			if got[2+i] != w {
+				t.Fatalf("wrap=%v: arg %d = %q, want %q", wrap, i, got[2+i], w)
+			}
+		}
+		if _, err := r.svc.Start(context.Background(), chat.StartOptions{Cwd: r.home}); err != nil {
+			t.Fatal(err)
+		}
+		if got := r.waitRuns(t, 2)[1].Args; len(got) != 2 {
+			t.Fatalf("wrap=%v: no arguments must add none: %q", wrap, got)
+		}
 	}
 }

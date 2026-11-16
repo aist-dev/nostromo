@@ -4,7 +4,6 @@ package cli
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -119,7 +118,7 @@ func NewApp(env Env) (*App, error) {
 }
 
 const usage = `Usage:
-  agent [-a <agent>] [--cwd <dir>] [--title <text>] [--detach]   start a new chat and attach
+  agent [--nostr-<flag>...] [<agent args>...]   start a new chat and attach
   agent ls                       list chats by directory
   agent attach <id>              attach to a running chat
   agent resume <id>              resume a stopped chat and attach
@@ -129,13 +128,24 @@ const usage = `Usage:
   agent doctor | update | uninstall | version
   agent hook <adapter>           internal: called by agent hooks
 
+Flags of a new chat (they may appear anywhere; "--nostr-x=v" works too):
+  --nostr-agent <name>   agent from config.toml (default: default_agent)
+  --nostr-cwd <dir>      working directory (default: the current one)
+  --nostr-title <text>   chat title (default: set from the first prompt)
+  --nostr-detach         do not attach; print the chat id
+
+Every other argument goes to the agent's start command unchanged, e.g.
+  agent --nostr-detach --model opus "Fix the failing test"
+Arguments that would break chat tracking (deny_args in config.toml) are refused.
+A resumed chat does not get them again.
+
 <id> may be any unambiguous prefix of a chat id.
 `
 
 // Main runs the CLI and returns the process exit code.
 func Main(args []string, env Env) int {
 	ctx := context.Background()
-	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+	if len(args) > 0 && isCommand(args[0], env) {
 		cmd, rest := args[0], args[1:]
 		switch cmd {
 		case "version":
@@ -164,17 +174,31 @@ func Main(args []string, env Env) int {
 				}
 			})
 		}
-		if c, ok := env.Commands[cmd]; ok {
-			return c(ctx, rest, env)
-		}
-		fmt.Fprintf(env.Stderr, "agent: unknown command %q\n\n%s", cmd, usage)
-		return 2
+		return env.Commands[cmd](ctx, rest, env)
 	}
-	if len(args) == 1 && (args[0] == "--version") {
-		fmt.Fprintln(env.Stdout, version.Version)
-		return 0
+	if len(args) == 1 {
+		switch args[0] {
+		case "--version":
+			fmt.Fprintln(env.Stdout, version.Version)
+			return 0
+		case "-h", "--help":
+			fmt.Fprint(env.Stdout, usage)
+			return 0
+		}
 	}
 	return newChat(ctx, args, env)
+}
+
+var builtins = map[string]bool{"version": true, "help": true, "ls": true, "list": true, "attach": true, "resume": true, "stop": true, "rm": true}
+
+// isCommand reports whether arg names a subcommand; anything else starts a chat
+// and is passed to the agent.
+func isCommand(arg string, env Env) bool {
+	if builtins[arg] {
+		return true
+	}
+	_, ok := env.Commands[arg]
+	return ok
 }
 
 func withApp(env Env, fn func(*App) error) int {
@@ -189,39 +213,81 @@ func withApp(env Env, fn func(*App) error) int {
 	return 0
 }
 
-func newChat(ctx context.Context, args []string, env Env) int {
-	fs := flag.NewFlagSet("agent", flag.ContinueOnError)
-	fs.SetOutput(env.Stderr)
-	fs.Usage = func() { fmt.Fprint(env.Stderr, usage) }
-	var agentName, cwd, title string
-	var detach bool
-	fs.StringVar(&agentName, "a", "", "agent from the config")
-	fs.StringVar(&agentName, "agent", "", "agent from the config")
-	fs.StringVar(&cwd, "cwd", "", "working directory")
-	fs.StringVar(&title, "title", "", "chat title")
-	fs.BoolVar(&detach, "detach", false, "do not attach")
-	fs.BoolVar(&detach, "d", false, "do not attach")
-	if err := fs.Parse(args); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return 0
+// FlagPrefix starts every launcher flag, so they never collide with the flags
+// of an agent.
+const FlagPrefix = "--nostr-"
+
+// launch holds the parsed new-chat command line.
+type launch struct {
+	agent, cwd, title string
+	detach            bool
+	args              []string
+}
+
+// renamed are launcher flags of nostromo 0.1 that now pass through; they are
+// refused so old scripts fail loudly instead of handing them to the agent.
+var renamed = []string{"--cwd", "--title", "--detach"}
+
+func parseLaunch(args []string) (launch, error) {
+	var l launch
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		for _, old := range renamed {
+			if arg == old || strings.HasPrefix(arg, old+"=") {
+				return l, fmt.Errorf("%s is now %s%s", old, FlagPrefix, old[2:])
+			}
 		}
-		return 2
+		if !strings.HasPrefix(arg, FlagPrefix) {
+			l.args = append(l.args, arg)
+			continue
+		}
+		name, value, hasValue := strings.Cut(arg[len(FlagPrefix):], "=")
+		var dst *string
+		switch name {
+		case "detach":
+			if hasValue {
+				return l, fmt.Errorf("%sdetach takes no value", FlagPrefix)
+			}
+			l.detach = true
+			continue
+		case "agent":
+			dst = &l.agent
+		case "cwd":
+			dst = &l.cwd
+		case "title":
+			dst = &l.title
+		default:
+			return l, fmt.Errorf("unknown flag %s%s", FlagPrefix, name)
+		}
+		if !hasValue {
+			if i+1 >= len(args) {
+				return l, fmt.Errorf("%s%s needs a value", FlagPrefix, name)
+			}
+			i++
+			value = args[i]
+		}
+		*dst = value
 	}
-	if fs.NArg() > 0 {
-		fmt.Fprintf(env.Stderr, "agent: unexpected argument %q\n\n%s", fs.Arg(0), usage)
+	return l, nil
+}
+
+func newChat(ctx context.Context, args []string, env Env) int {
+	l, err := parseLaunch(args)
+	if err != nil {
+		fmt.Fprintf(env.Stderr, "agent: %v\n\n%s", err, usage)
 		return 2
 	}
 	return withApp(env, func(a *App) error {
-		dir, err := a.resolveDir(cwd)
+		dir, err := a.resolveDir(l.cwd)
 		if err != nil {
 			return err
 		}
 		cols, rows, _ := env.TermSize()
-		r, err := a.Chats.Start(ctx, chat.StartOptions{Agent: agentName, Cwd: dir, Title: title, Cols: cols, Rows: rows})
+		r, err := a.Chats.Start(ctx, chat.StartOptions{Agent: l.agent, Cwd: dir, Title: l.title, Args: l.args, Cols: cols, Rows: rows})
 		if err != nil {
 			return err
 		}
-		if detach {
+		if l.detach {
 			fmt.Fprintln(env.Stdout, r.ID)
 			return nil
 		}

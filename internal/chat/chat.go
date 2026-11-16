@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -25,6 +26,7 @@ var (
 	ErrAlreadyRunning = errors.New("chat is already running")
 	ErrNotRunning     = errors.New("chat is not running")
 	ErrTmux           = errors.New("tmux failed")
+	ErrDeniedArg      = errors.New("denied argument")
 )
 
 // Environment variables passed to every agent.
@@ -68,8 +70,10 @@ type StartOptions struct {
 	Agent string
 	Cwd   string
 	Title string
-	Cols  int
-	Rows  int
+	// Args are passed through to the agent's start command (not to resume).
+	Args []string
+	Cols int
+	Rows int
 }
 
 func checkCwd(cwd string) error {
@@ -100,10 +104,17 @@ func (s *Service) EnsureTmuxConf() error {
 	return config.WriteFileAtomic(p, []byte(tmux.Conf), 0o644)
 }
 
-func (s *Service) launch(ctx context.Context, r store.Record, a config.Agent, resume bool, cols, rows int) error {
-	cmd, err := adapter.Command(a, resume, adapter.Values{ID: r.ID, ResumeID: r.ResumeID, Cwd: r.Cwd}, s.Shell)
+func (s *Service) launch(ctx context.Context, r store.Record, a config.Agent, resume bool, args []string, cols, rows int) error {
+	argsDir := filepath.Join(s.Paths.Home, "run", r.ID)
+	cmd, err := adapter.Command(a, resume, adapter.Values{ID: r.ID, ResumeID: r.ResumeID, Cwd: r.Cwd, Args: args}, s.Shell, argsDir)
 	if err != nil {
 		return err
+	}
+	if len(args) > 0 && !resume {
+		if err := adapter.WriteArgs(argsDir, args); err != nil {
+			os.RemoveAll(argsDir)
+			return fmt.Errorf("store the agent arguments: %w", err)
+		}
 	}
 	if err := s.EnsureTmuxConf(); err != nil {
 		return err
@@ -113,6 +124,7 @@ func (s *Service) launch(ctx context.Context, r store.Record, a config.Agent, re
 		Env: []string{EnvChatID + "=" + r.ID, EnvHome + "=" + s.Paths.Home},
 	}
 	if err := s.Tmux.NewSession(ctx, spec); err != nil {
+		os.RemoveAll(argsDir)
 		return fmt.Errorf("%w: %v", ErrTmux, err)
 	}
 	return nil
@@ -127,6 +139,9 @@ func (s *Service) Start(ctx context.Context, o StartOptions) (store.Record, erro
 	if err != nil {
 		return store.Record{}, err
 	}
+	if err := a.CheckArgs(o.Args); err != nil {
+		return store.Record{}, fmt.Errorf("%w: agent %s: %v", ErrDeniedArg, name, err)
+	}
 	if _, err := tmux.CheckVersion(ctx, s.Tmux); err != nil {
 		return store.Record{}, fmt.Errorf("%w: %v", ErrTmux, err)
 	}
@@ -139,7 +154,7 @@ func (s *Service) Start(ctx context.Context, o StartOptions) (store.Record, erro
 	if err := s.Store.Create(r); err != nil {
 		return store.Record{}, err
 	}
-	if err := s.launch(ctx, r, a, false, o.Cols, o.Rows); err != nil {
+	if err := s.launch(ctx, r, a, false, o.Args, o.Cols, o.Rows); err != nil {
 		s.Store.Delete(id)
 		return store.Record{}, err
 	}
@@ -184,7 +199,7 @@ func (s *Service) Resume(ctx context.Context, id string, cols, rows int) (store.
 	if r.TmuxSession == "" {
 		r.TmuxSession = store.SessionName(r.ID)
 	}
-	if err := s.launch(ctx, r, a, true, cols, rows); err != nil {
+	if err := s.launch(ctx, r, a, true, nil, cols, rows); err != nil {
 		return r, err
 	}
 	return s.Store.Update(id, func(rec *store.Record) error {

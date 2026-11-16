@@ -205,8 +205,9 @@ The config is read on every command and at server start. A missing file means de
 | Command | What it does |
 | --- | --- |
 | `agent` | new chat in the current directory with the default agent, then attach |
-| `agent -a <name>` | same with another agent from the config |
-| `agent --cwd <path>`, `--title <text>`, `--detach` | directory, title, do not attach |
+| `agent --nostr-agent <name>` | same with another agent from the config |
+| `agent --nostr-cwd <path>`, `--nostr-title <text>`, `--nostr-detach` | directory, title, do not attach (print the id) |
+| `agent [--nostr-...] <args>...` | any other argument goes to the agent's start command (section 5.4) |
 | `agent ls` | chats grouped by directory, with status |
 | `agent attach <id>` | attach the terminal to a running chat |
 | `agent resume <id>` | resume a stopped chat and attach |
@@ -226,20 +227,22 @@ One function, `chat.Start`, runs this sequence. Both the launcher and the server
 
 1. Check: the directory exists, the adapter exists in the config, tmux is present and at least 3.2.
 2. Generate `id` (UUID v4). Build the record with `resume_id = id`. Write the file.
-3. Build the agent command from the `start` template, substituting shell-escaped values.
-4. Wrap it: `exec $SHELL -lic 'exec <command>'` (or the command alone when `shell_wrap = false`). `NOSTROMO_CHAT_ID` and `NOSTROMO_HOME` are set with `new-session -e`, so they reach the agent either way.
+3. Check the pass-through arguments against the agent's `deny_args`; a match fails before anything is written. Build the agent command from the `start` template, substituting shell-escaped values; `{args}` becomes `"$@"` (`$argv` for fish).
+4. Wrap it: `exec $SHELL -lic 'exec <command>' nostromo "$@"` (or the command alone when `shell_wrap = false`). With pass-through arguments, store them one file each in `~/.nostromo/run/<id>/` and prefix a `/bin/sh` snippet that loads them into `"$@"` and removes the directory. `NOSTROMO_CHAT_ID` and `NOSTROMO_HOME` are set with `new-session -e`, so they reach the agent either way.
 5. Ensure `~/.nostromo/tmux.conf` exists. With one tmux call, create the session and set its options so they apply before the command can exit:
 
 ```text
 tmux -L nostromo -f ~/.nostromo/tmux.conf \
      new-session -d -s agent-<id8> -c <cwd> -x <cols> -y <rows> \
-                 -e NOSTROMO_CHAT_ID=<id> -e NOSTROMO_HOME=<path> '<wrapped command>' \; \
+                 -e NOSTROMO_CHAT_ID=<id> -e NOSTROMO_HOME=<path> /bin/sh -c '<wrapped command>' \; \
      set-option    -t agent-<id8> @nostromo_chat <id> \; \
      set-option -w -t agent-<id8> remain-on-exit failed
 ```
 
-6. If tmux fails: delete the record, print the reason, exit code 1.
-7. Attach. With `--detach` or without a TTY: print `id`. Inside a nostromo tmux (`$TMUX` points at the nostromo socket): `tmux switch-client -t ...`. Otherwise: `exec tmux -L nostromo attach-session -t ...`.
+Passing `/bin/sh -c <command>` as separate arguments makes tmux exec it directly, so the outer command is always parsed by `/bin/sh`, whatever tmux's `default-shell` is.
+
+6. If tmux fails: delete the record and the argument files, print the reason, exit code 1.
+7. Attach. With `--nostr-detach` or without a TTY: print `id`. Inside a nostromo tmux (`$TMUX` points at the nostromo socket): `tmux switch-client -t ...`. Otherwise: `exec tmux -L nostromo attach-session -t ...`.
 
 Size `-x/-y`: the launcher uses the current terminal size; the server uses 120×40 until the first browser connects.
 
@@ -248,7 +251,7 @@ Size `-x/-y`: the launcher uses the current terminal size; the server uses 120×
 1. Status `running`: start nothing, just attach.
 2. Status `failed`: `tmux kill-session` first.
 3. Check that `cwd` exists. If not, fail with a clear message and leave the record untouched.
-4. Same sequence as 5.1 with the `resume` template and the current `resume_id`. Update `last_started_at`.
+4. Same sequence as 5.1 with the `resume` template and the current `resume_id`, without pass-through arguments: a resumed conversation must not get its first prompt again. Update `last_started_at`.
 
 ### 5.3. Command name
 
@@ -261,11 +264,23 @@ On a machine where `agent` used to be a shell alias (for example `alias agent='c
 
 Agent hooks and service files never call `agent` by name: aliases do not work in non-interactive shells, and the `PATH` of a service or hook can differ. They always use the absolute path of `~/.nostromo/bin/agent`, expanded at write time.
 
+### 5.4. Pass-through arguments
+
+nostromo's own launcher flags all start with `--nostr-`, so no agent flag can collide with them (Claude's `-d` is `--debug`, `--agent` is a Claude flag). They may appear anywhere on the command line, as `--nostr-x value` or `--nostr-x=value`; an unknown `--nostr-` flag is an error. The flags of 0.1 (`--cwd`, `--title`, `--detach`) are refused with a hint so old scripts fail loudly. A first argument that names a subcommand (`ls`, `resume`, `serve`, ...) runs it; anything else starts a chat.
+
+Every other argument reaches the agent as one argument, byte for byte. Arguments do not travel in the tmux command: tmux limits a command to about 16 KB, and a long prompt full of quotes grows several times with two levels of shell quoting. They go through files instead (5.1, steps 3 and 4).
+
+`deny_args` (per agent, built-in default for Claude) lists arguments a chat may not start with: session selection (`--resume`, `--continue`, `--session-id`, `--fork-session`, `--from-pr`) would detach the record from the conversation; one-shot modes (`--print`, `--help`, `--version`, `--bg`) would end the session at once; a Claude subcommand name as an argument runs the subcommand instead of a chat, even after `--`. Matching: `--flag` and `--flag=value`; a one-letter flag also inside combined short flags (`-dr`); an entry without a dash equals a whole argument.
+
+The title is not taken from the arguments: Claude Code fires `UserPromptSubmit` for a prompt given on the command line, and the hook sets the title from it (verified with Claude Code 2.1).
+
+Deferred: a `prompt` field in `POST /api/chats` and in the new-chat dialog. The API keeps accepting no arguments at all.
+
 ## 6. Agent adapters
 
 An adapter is a config block with two command templates, `start` and `resume`. A new CLI agent is added without code changes.
 
-Template placeholders: `{id}`, `{resume_id}`, `{cwd}`. Values are shell-escaped. An unknown placeholder is an error at config load time, not at chat start.
+Template placeholders: `{id}`, `{resume_id}`, `{cwd}`, and `{args}` in `start` only (pass-through arguments, section 5.4; appended when missing). Values are shell-escaped, for fish when the command runs through a fish login shell. An unknown placeholder is an error at config load time, not at chat start.
 
 ```toml
 [agents.codex]              # example; verify exact commands against the agent's docs when adding

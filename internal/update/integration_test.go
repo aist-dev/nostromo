@@ -97,7 +97,7 @@ func TestUpdateKeepsAgentsRunning(t *testing.T) {
 		return string(out), err
 	}
 
-	id, err := run("--detach")
+	id, err := run("--nostr-detach")
 	if err != nil {
 		t.Fatalf("start chat: %v %s", err, id)
 	}

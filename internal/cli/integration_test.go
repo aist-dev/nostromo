@@ -56,7 +56,7 @@ func TestLauncherInsideTmuxSwitchesClient(t *testing.T) {
 	}
 	testutil.Eventually(t, 5*time.Second, "client attached", func() bool { return clientSession() == "shell" })
 
-	testutil.SendKeys(tm, "shell", "'"+agentBin+"' --title inner")
+	testutil.SendKeys(tm, "shell", "'"+agentBin+"' --nostr-title inner")
 	testutil.Eventually(t, 10*time.Second, "client switched to the new chat", func() bool {
 		return strings.HasPrefix(clientSession(), "agent-")
 	})
@@ -83,9 +83,15 @@ func TestLauncherBinary(t *testing.T) {
 		}
 		return string(out)
 	}
-	id := strings.TrimSpace(run("--detach", "--title", "bin test"))
+	prompt := "it's \"quoted\" $HOME $(id) `id` ; && | \\ \nnew line кириллица 🚀 " + strings.Repeat("x", 8000)
+	id := strings.TrimSpace(run("--nostr-detach", "--nostr-title", "bin test", "--flag", "-v", prompt))
 	if len(id) != 36 {
-		t.Fatalf("id: %q", id)
+		t.Fatalf("detach must print only the id: %q", id)
+	}
+	runs := testutil.FakeRuns(home)
+	testutil.Eventually(t, 5*time.Second, "fake agent start", func() bool { runs = testutil.FakeRuns(home); return len(runs) == 1 })
+	if a := runs[0].Args; len(a) != 5 || a[2] != "--flag" || a[3] != "-v" || a[4] != prompt {
+		t.Fatalf("the agent must get the arguments unchanged, the prompt last: %q", a)
 	}
 	if out := run("ls"); !strings.Contains(out, id[:8]) || !strings.Contains(out, "running") || !strings.Contains(out, "bin test") {
 		t.Fatalf("ls: %s", out)
@@ -99,6 +105,10 @@ func TestLauncherBinary(t *testing.T) {
 	}
 	if out := run("ls"); !strings.Contains(out, "running") {
 		t.Fatalf("ls after resume: %s", out)
+	}
+	testutil.Eventually(t, 5*time.Second, "fake agent resume", func() bool { runs = testutil.FakeRuns(home); return len(runs) == 2 })
+	if a := runs[1].Args; len(a) != 2 || a[0] != "--resume" {
+		t.Fatalf("resume must not repeat the start arguments: %q", a)
 	}
 	run("rm", id[:8])
 	if out := run("ls"); !strings.Contains(out, "no chats yet") {

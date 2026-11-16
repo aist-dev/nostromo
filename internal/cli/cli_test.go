@@ -81,14 +81,18 @@ func TestVersionAndHelp(t *testing.T) {
 	if code := h.run("-h"); code != 0 {
 		t.Fatalf("-h: %d", code)
 	}
-	if code := h.run("bogus"); code != 2 || !strings.Contains(h.err.String(), "unknown command") {
-		t.Fatalf("unknown: %d %s", code, h.err)
+	if code := h.run("--help"); code != 0 || !strings.Contains(h.out.String(), "--nostr-detach") {
+		t.Fatalf("--help: %d", code)
 	}
-	if code := h.run("--bogus"); code != 2 {
-		t.Fatalf("bad flag: %d", code)
+	for _, args := range [][]string{
+		{"--nostr-bogus"}, {"--nostr-cwd"}, {"--nostr-detach=yes"}, {"--cwd", "x"}, {"--title=x"}, {"--detach"},
+	} {
+		if code := h.run(args...); code != 2 {
+			t.Fatalf("%v: %d", args, code)
+		}
 	}
-	if code := h.run("--detach", "extra"); code != 2 {
-		t.Fatalf("extra arg: %d", code)
+	if !strings.Contains(h.err.String(), "--detach is now --nostr-detach") {
+		t.Fatalf("renamed hint: %s", h.err)
 	}
 	if code := h.run("attach"); code != 2 {
 		t.Fatalf("missing id: %d", code)
@@ -98,7 +102,7 @@ func TestVersionAndHelp(t *testing.T) {
 func TestNewChatAttachesWithExec(t *testing.T) {
 	h := newHarness(t)
 	h.vars["TMUX"] = "/tmp/tmux-1/default,1,0"
-	if code := h.run("--title", "hello"); code != 0 {
+	if code := h.run("--nostr-title", "hello"); code != 0 {
 		t.Fatalf("code %d: %s", code, h.err)
 	}
 	r := h.onlyChat(t)
@@ -126,7 +130,7 @@ func TestNewChatDetachAndNoTTY(t *testing.T) {
 	h := newHarness(t)
 	sub := filepath.Join(h.home, "proj")
 	os.Mkdir(sub, 0o755)
-	if code := h.run("-d", "--cwd", "~/proj"); code != 0 {
+	if code := h.run("--nostr-detach", "--nostr-cwd=~/proj"); code != 0 {
 		t.Fatalf("%d %s", code, h.err)
 	}
 	r := h.onlyChat(t)
@@ -137,7 +141,7 @@ func TestNewChatDetachAndNoTTY(t *testing.T) {
 	h2 := newHarness(t)
 	h2.tty = false
 	os.Mkdir(filepath.Join(h2.cwd, "rel"), 0o755)
-	if code := h2.run("--cwd", "rel"); code != 0 {
+	if code := h2.run("--nostr-cwd", "rel"); code != 0 {
 		t.Fatalf("%d %s", code, h2.err)
 	}
 	r2 := h2.onlyChat(t)
@@ -157,12 +161,55 @@ func TestNewChatInsideNostromoTmuxSwitches(t *testing.T) {
 	}
 }
 
-func TestNewChatErrors(t *testing.T) {
+func TestNewChatPassesArgsThrough(t *testing.T) {
 	h := newHarness(t)
-	if code := h.run("--cwd", "/definitely/missing"); code != 1 || !strings.Contains(h.err.String(), "does not exist") {
+	h.vars["SHELL"] = "/bin/sh"
+	prompt := "it's $HOME `x` \\ \n --help"
+	code := h.run("--model", "opus", "--nostr-detach", prompt, "--nostr-title", "probe")
+	if code != 0 {
 		t.Fatalf("%d %s", code, h.err)
 	}
-	if code := h.run("-a", "ghost"); code != 1 || !strings.Contains(h.err.String(), "unknown agent") {
+	r := h.onlyChat(t)
+	if strings.TrimSpace(h.out.String()) != r.ID || r.Title != "probe" {
+		t.Fatalf("detach must print only the id: %q %+v", h.out, r)
+	}
+	s, _ := h.fake.Get(r.TmuxSession)
+	if strings.Contains(s.Spec.Command, "opus") || strings.Contains(s.Spec.Command, "--nostr-") {
+		t.Fatalf("arguments must not be inlined in the command: %s", s.Spec.Command)
+	}
+	dir := filepath.Join(h.vars["NOSTROMO_HOME"], "run", r.ID)
+	files, _ := os.ReadDir(dir)
+	var got []string
+	for _, f := range files {
+		b, _ := os.ReadFile(filepath.Join(dir, f.Name()))
+		got = append(got, string(b))
+	}
+	if strings.Join(got, "|") != "--model|opus|"+prompt {
+		t.Fatalf("stored arguments: %q", got)
+	}
+}
+
+func TestNewChatDeniedArgs(t *testing.T) {
+	h := newHarness(t)
+	for _, args := range [][]string{{"--resume", "x"}, {"-c"}, {"--session-id=x"}, {"update"}, {"-p", "hi"}} {
+		if code := h.run(append([]string{"--nostr-detach"}, args...)...); code != 1 || !strings.Contains(h.err.String(), "is not allowed") {
+			t.Fatalf("%v: %d %s", args, code, h.err)
+		}
+	}
+	if recs, _, _ := store.New(filepath.Join(h.vars["NOSTROMO_HOME"], "chats")).List(); len(recs) != 0 {
+		t.Fatalf("a refused chat must leave no record: %d", len(recs))
+	}
+	if code := h.run("--nostr-detach", "fix the update script"); code != 0 {
+		t.Fatalf("a prompt that only mentions a subcommand is fine: %s", h.err)
+	}
+}
+
+func TestNewChatErrors(t *testing.T) {
+	h := newHarness(t)
+	if code := h.run("--nostr-cwd", "/definitely/missing"); code != 1 || !strings.Contains(h.err.String(), "does not exist") {
+		t.Fatalf("%d %s", code, h.err)
+	}
+	if code := h.run("--nostr-agent", "ghost"); code != 1 || !strings.Contains(h.err.String(), "unknown agent") {
 		t.Fatalf("%d %s", code, h.err)
 	}
 	h.execErr = errors.New("exec failed")
@@ -173,7 +220,7 @@ func TestNewChatErrors(t *testing.T) {
 	if code := h.run(); code != 1 {
 		t.Fatal("getwd error")
 	}
-	if code := h.run("--cwd", "rel"); code != 1 {
+	if code := h.run("--nostr-cwd", "rel"); code != 1 {
 		t.Fatal("getwd error for relative path")
 	}
 }
@@ -202,7 +249,7 @@ func TestLsAttachResumeStopRm(t *testing.T) {
 		t.Fatalf("empty ls: %s", h.out)
 	}
 	h.vars["HOME"] = filepath.Dir(h.cwd)
-	h.run("-d", "--title", "first")
+	h.run("--nostr-detach", "--nostr-title", "first")
 	r := h.onlyChat(t)
 	id := r.ID[:8]
 
@@ -249,10 +296,10 @@ func TestLsAttachResumeStopRm(t *testing.T) {
 
 func TestLsReportsBadRecordsAndErrors(t *testing.T) {
 	h := newHarness(t)
-	h.run("-d")
+	h.run("--nostr-detach")
 	chats := filepath.Join(h.vars["NOSTROMO_HOME"], "chats")
 	os.WriteFile(filepath.Join(chats, "abcdef00-0000-4000-8000-000000000000.json"), []byte("{"), 0o600)
-	h.run("-d")
+	h.run("--nostr-detach")
 	if code := h.run("ls"); code != 0 || !strings.Contains(h.err.String(), "1 unreadable") {
 		t.Fatalf("%d %s", code, h.err)
 	}
@@ -266,7 +313,7 @@ func TestLsReportsBadRecordsAndErrors(t *testing.T) {
 
 func TestResumeLiveError(t *testing.T) {
 	h := newHarness(t)
-	h.run("-d")
+	h.run("--nostr-detach")
 	r := h.onlyChat(t)
 	h.fake.Kill(r.TmuxSession, 0)
 	h.fake.Errs["ListPanes"] = errors.New("boom")

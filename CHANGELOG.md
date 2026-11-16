@@ -2,13 +2,17 @@
 
 Every version notes whether it migrates stored data (chat records or config).
 
-## 0.1.3 — 2026-11-16
+## 0.2.0 — 2026-11-17
 
+- **Breaking:** the launcher flags are now `--nostr-agent`, `--nostr-cwd`, `--nostr-title` and `--nostr-detach`, so they never collide with an agent's flags (Claude's `-d` is `--debug`). The old `--cwd`, `--title` and `--detach` stop with a hint; `-a` and `-d` now go to the agent.
+- Every other argument of `agent` is passed to the agent's start command unchanged, e.g. `agent --nostr-detach "Fix the failing test"` starts Claude with that first message. Arguments travel through files, not the tmux command line, so any text of any length arrives byte for byte. `agent resume` does not repeat them.
+- New placeholder `{args}` for `start`; a `start` without it gets the arguments appended. New per-agent `deny_args`: arguments that would break chat tracking (for Claude `--resume`, `--continue`, `--session-id`, `--print`, subcommand names, ...) are refused before anything starts.
+- Fish users: values in agent commands are quoted for fish when the command runs through the login shell (backslashes used to change). The pane command now always runs under `/bin/sh` instead of tmux's `default-shell`.
 - A browser on the machine itself can use `http://127.0.0.1:8787` again when `allowed_users` is set (it got `user not allowed`).
 - Security: requests through `tailscale serve` with a forged `Host: localhost` are no longer treated as local; they are recognized by the proxy's headers.
 - Reinstalling restarts the running service whenever its binary or unit file changed (before, a changed unit left the old server running).
 
-Data migration: none.
+Data migration: none. An existing `config.toml` keeps working: its `start` lines get the arguments appended.
 
 ## 0.1.2 — 2026-11-16
 
