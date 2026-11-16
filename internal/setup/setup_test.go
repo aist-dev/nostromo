@@ -243,6 +243,9 @@ func TestSetupManualSteps(t *testing.T) {
 	if len(f.ts.served) != 0 {
 		t.Fatal("tailscale serve must not be called while HTTPS certificates are off")
 	}
+	if !strings.Contains(out, "then run: "+f.in.Paths.Binary()+" setup") {
+		t.Fatalf("hints must use the full path, an alias may still shadow agent:\n%s", out)
+	}
 	if _, err := os.Stat(filepath.Join(f.home, ".bashrc")); err == nil {
 		t.Fatal("PATH already contains ~/.local/bin: no rc edit expected")
 	}

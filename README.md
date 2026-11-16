@@ -53,7 +53,7 @@ Both ways call the new binary by its full path, so an existing `agent` alias doe
 6. Configures `tailscale serve --bg --https=443 http://127.0.0.1:8787` (port 8443 if 443 is used by something else) and limits the UI to your Tailscale login (`allowed_users`).
 7. Prints the address and runs `agent doctor`.
 
-Anything it cannot do by itself is listed at the end under **Left to do by hand**, with the exact command.
+Anything it cannot do by itself is listed at the end under **Left to do by hand**, with the exact command. To rerun setup after such a step, use the full path, `~/.nostromo/bin/agent setup`: in a terminal opened before the install, `agent` may still be the old alias or not on `PATH` yet.
 
 ### Steps that need you
 
@@ -62,12 +62,12 @@ These need administrator rights or a browser, so `agent setup` never runs them i
 | When | What to run | Why |
 | --- | --- | --- |
 | tmux missing or older than 3.2 | `sudo apt install tmux` (Debian/Ubuntu), `brew install tmux` (macOS) | chats run in tmux |
-| Linux, `tailscale serve` says access denied | `sudo tailscale set --operator=$USER`, then `agent setup` again | lets your user configure `tailscale serve` without sudo |
+| Linux, `tailscale serve` says access denied | `sudo tailscale set --operator=$USER`, then `~/.nostromo/bin/agent setup` again | lets your user configure `tailscale serve` without sudo |
 | Linux, setup could not enable linger | `sudo loginctl enable-linger $USER` | the service starts at boot without logging in |
-| MagicDNS or HTTPS certificates are off | enable both at https://login.tailscale.com/admin/dns, then `agent setup` again | the HTTPS address needs them |
-| Tailscale not installed or not logged in | install it from https://tailscale.com/download, run `tailscale up`, then `agent setup` again | access from other devices |
+| MagicDNS or HTTPS certificates are off | enable both at https://login.tailscale.com/admin/dns, then `~/.nostromo/bin/agent setup` again | the HTTPS address needs them |
+| Tailscale not installed or not logged in | install it from https://tailscale.com/download, run `tailscale up`, then `~/.nostromo/bin/agent setup` again | access from other devices |
 | `claude` not found | install and log in to Claude Code | the default agent |
-| `~/.claude/settings.json` is not valid JSON | fix the file, then `agent setup` again (or paste the printed snippet) | setup never edits a file it cannot parse |
+| `~/.claude/settings.json` is not valid JSON | fix the file, then `~/.nostromo/bin/agent setup` again (or paste the printed snippet) | setup never edits a file it cannot parse |
 
 After the first install, open a new terminal so the `PATH` change and the disabled alias take effect.
 
@@ -183,4 +183,6 @@ scripts/test-install.sh                          # installer against a fake rele
 
 Tests never touch the real `~/.nostromo` or your tmux sessions. Releases are built by GoReleaser from `v*` tags; see [docs/release-checklist.md](docs/release-checklist.md).
 
-Third-party code: the vendored xterm.js in `internal/server/web/vendor` is MIT licensed by its authors.
+## License
+
+MIT, see [LICENSE](LICENSE). The vendored xterm.js in `internal/server/web/vendor` is MIT licensed by its authors.

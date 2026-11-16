@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aist-dev/nostromo/internal/adapter"
 	"github.com/aist-dev/nostromo/internal/config"
 	"github.com/aist-dev/nostromo/internal/tailscale"
 	"github.com/aist-dev/nostromo/internal/tmux"
@@ -74,6 +75,13 @@ func (in *Installer) linkPath() string {
 // lingerMarker exists when setup enabled linger for this user.
 func (in *Installer) lingerMarker() string {
 	return filepath.Join(in.Paths.Home, "linger-enabled-by-setup")
+}
+
+// setupCmd is the command that reruns setup. It uses the full path: right after
+// the first install, "agent" in an open terminal may still be an old alias or
+// not on PATH yet.
+func (in *Installer) setupCmd() string {
+	return adapter.ShellQuote(in.Paths.Binary()) + " setup"
 }
 
 func (in *Installer) claudeSettings() string {
@@ -218,11 +226,11 @@ func (in *Installer) command(r *report) error {
 	case fi.Mode()&os.ModeSymlink != 0:
 		dest, _ := os.Readlink(link)
 		if dest != in.Paths.Binary() {
-			return fmt.Errorf("%s points to %s, another program.\n  Remove it, or install under another name: NOSTROMO_CMD=ag agent setup", link, dest)
+			return fmt.Errorf("%s points to %s, another program.\n  Remove it, or install under another name: NOSTROMO_CMD=ag %s", link, dest, in.setupCmd())
 		}
 		r.ok("%s -> %s", link, dest)
 	default:
-		return fmt.Errorf("%s is another program.\n  Remove it, or install under another name: NOSTROMO_CMD=ag agent setup", link)
+		return fmt.Errorf("%s is another program.\n  Remove it, or install under another name: NOSTROMO_CMD=ag %s", link, in.setupCmd())
 	}
 	binDir := filepath.Dir(link)
 	if !inPath(in.PathEnv, binDir) {
@@ -405,7 +413,7 @@ func (in *Installer) waitHealthy(ctx context.Context, cfg config.Config, r *repo
 // operatorHint is the one-time command that lets a Linux user manage tailscale serve.
 func (in *Installer) operatorHint() string {
 	if in.GOOS == "linux" {
-		return "allow your user to configure Tailscale: sudo tailscale set --operator=" + in.User + "\n then run: agent setup"
+		return "allow your user to configure Tailscale: sudo tailscale set --operator=" + in.User + "\n then run: " + in.setupCmd()
 	}
 	return "run: tailscale serve --bg --https=443 http://127.0.0.1:<port>"
 }
@@ -413,19 +421,19 @@ func (in *Installer) operatorHint() string {
 func (in *Installer) tailscaleServe(ctx context.Context, cfg config.Config, r *report) {
 	if in.Tailscale == nil {
 		r.warn("tailscale CLI not found: the UI is only reachable on this machine")
-		r.need("install Tailscale and log in (https://tailscale.com/download), then run: agent setup")
+		r.need("install Tailscale and log in (https://tailscale.com/download), then run: " + in.setupCmd())
 		return
 	}
 	st, err := in.Tailscale.Status(ctx)
 	if err != nil || !st.Running() {
 		r.warn("Tailscale is not running")
-		r.need("start Tailscale and log in (tailscale up), then run: agent setup")
+		r.need("start Tailscale and log in (tailscale up), then run: " + in.setupCmd())
 		return
 	}
 	if !st.MagicDNSEnabled || len(st.CertDomains) == 0 {
 		// tailscale serve would block waiting for HTTPS to be enabled in the admin console.
 		r.warn("MagicDNS or HTTPS certificates are off in this tailnet; skipping tailscale serve")
-		r.need("enable MagicDNS and HTTPS certificates once for the tailnet: https://login.tailscale.com/admin/dns\n then run: agent setup")
+		r.need("enable MagicDNS and HTTPS certificates once for the tailnet: https://login.tailscale.com/admin/dns\n then run: " + in.setupCmd())
 		return
 	}
 	target := in.target(cfg)
@@ -460,7 +468,7 @@ func (in *Installer) tailscaleServe(ctx context.Context, cfg config.Config, r *r
 	}
 	if port == 0 {
 		r.warn("https ports 443 and 8443 are both used by other tailscale serve configs")
-		r.need("free one of them, then run: agent setup")
+		r.need("free one of them, then run: " + in.setupCmd())
 		return
 	}
 	for _, f := range sc.Funnel {
