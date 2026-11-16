@@ -361,9 +361,10 @@ func (in *Installer) service(ctx context.Context, o Options, newBinary bool, r *
 	} else {
 		r.ok("%s up to date", in.Service.Name())
 	}
-	// A running service still runs the old binary until it restarts. (On upgrade,
-	// agent update restarts it after setup.)
-	if wasRunning && newBinary && !changed {
+	// A running service keeps running the old binary and the old unit until it
+	// restarts: "systemctl enable --now" does not restart a running unit. (On
+	// upgrade, agent update restarts it after setup.)
+	if wasRunning && !o.Upgrade && (newBinary || changed) {
 		if err := in.Service.Restart(ctx); err != nil {
 			r.warn("restart %s: %v", in.Service.Name(), err)
 			r.need("restart the service: " + in.Service.RestartCommand())

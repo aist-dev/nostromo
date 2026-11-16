@@ -467,6 +467,17 @@ func TestSetupStops(t *testing.T) {
 	}
 }
 
+func TestSetupRestartsWhenUnitChanged(t *testing.T) {
+	f := newFixture(t)
+	f.in.Setup(context.Background(), Options{NoTailscale: true})
+	f.svc.installed = false // the next Install reports a changed unit
+	restarts := f.svc.restarts
+	f.in.Setup(context.Background(), Options{NoTailscale: true})
+	if f.svc.restarts != restarts+1 {
+		t.Fatal("a running service must be restarted when its unit changes")
+	}
+}
+
 func TestSetupRestartFailure(t *testing.T) {
 	f := newFixture(t)
 	f.in.Setup(context.Background(), Options{NoTailscale: true})

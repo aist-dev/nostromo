@@ -413,13 +413,22 @@ func TestOriginCheck(t *testing.T) {
 
 func TestAllowedUsers(t *testing.T) {
 	r := newRig(t, func(o *Options) { o.Config.AllowedUsers = []string{"me@example.com"} })
-	if res := r.do(t, "GET", "/api/state", nil, nil); res.code != 403 || res.errCode() != "forbidden" {
-		t.Fatalf("no identity: %d", res.code)
+	if res := r.do(t, "GET", "/api/state", nil, nil); res.code != 200 {
+		t.Fatalf("a browser on this machine is always allowed: %d", res.code)
+	}
+	proxy := map[string]string{"Host": "box.tail1.ts.net", "X-Forwarded-For": "100.64.0.2", "Tailscale-Headers-Info": "x"}
+	if res := r.do(t, "GET", "/api/state", nil, proxy); res.code != 403 || res.errCode() != "forbidden" {
+		t.Fatalf("no identity through the proxy: %d", res.code)
+	}
+	// A tailnet peer cannot pass as local by forging Host: the proxy headers give it away.
+	spoof := map[string]string{"Host": "localhost:8787", "X-Forwarded-For": "100.64.0.2"}
+	if res := r.do(t, "GET", "/api/state", nil, spoof); res.code != 403 {
+		t.Fatalf("forged Host through the proxy: %d", res.code)
 	}
 	if res := r.do(t, "GET", "/api/state", nil, map[string]string{IdentityHeader: "other@example.com"}); res.code != 403 {
 		t.Fatalf("other user: %d", res.code)
 	}
-	if res := r.do(t, "GET", "/api/state", nil, map[string]string{IdentityHeader: "ME@example.com"}); res.code != 200 {
+	if res := r.do(t, "GET", "/api/state", nil, map[string]string{IdentityHeader: "ME@example.com", "Host": "box.tail1.ts.net", "X-Forwarded-For": "100.64.0.2"}); res.code != 200 {
 		t.Fatalf("allowed user: %d", res.code)
 	}
 	if res := r.do(t, "GET", "/healthz", nil, nil); res.code != 200 {
@@ -449,6 +458,9 @@ func TestEmptyAllowedUsersIsLocalOnly(t *testing.T) {
 	}
 	if res := r.do(t, "GET", "/api/state", nil, map[string]string{"Host": "box.tail1.ts.net"}); res.code != 403 {
 		t.Fatalf("tailnet name with empty allowed_users: %d", res.code)
+	}
+	if res := r.do(t, "GET", "/api/state", nil, map[string]string{"Host": "localhost", "X-Forwarded-For": "100.64.0.2", "Tailscale-Headers-Info": "x"}); res.code != 403 {
+		t.Fatalf("forged Host through the proxy with empty allowed_users: %d", res.code)
 	}
 }
 

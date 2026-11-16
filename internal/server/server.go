@@ -203,20 +203,36 @@ func fromLoopback(r *http.Request) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
-// identityAllowed applies allowed_users. The Tailscale identity header is only
-// trusted on loopback connections, which is where tailscale serve connects from.
-// An empty list allows local access only; "*" allows every tailnet user.
+// proxied reports whether a request came through tailscale serve, which always
+// adds these headers. A client can add them but cannot make the proxy drop them.
+func proxied(r *http.Request) bool {
+	h := r.Header
+	return h.Get("X-Forwarded-For") != "" || h.Get("Tailscale-Headers-Info") != "" ||
+		h.Get(IdentityHeader) != "" || h.Get("X-Forwarded-Host") != ""
+}
+
+// localBrowser reports a direct request from this machine (for example a browser
+// on http://127.0.0.1:8787). tailscale serve forwards the client's Host header
+// unchanged, so a loopback Host alone proves nothing; the proxy headers do.
+func localBrowser(r *http.Request) bool {
+	return fromLoopback(r) && isLoopbackHost(hostOnly(r.Host)) && !proxied(r)
+}
+
+// identityAllowed applies allowed_users. Direct local requests are always
+// allowed. The Tailscale identity header is only trusted on loopback connections,
+// which is where tailscale serve connects from. An empty list allows local access
+// only; "*" allows every tailnet user.
 func (s *Server) identityAllowed(r *http.Request) bool {
 	if r.Method == http.MethodGet && r.URL.Path == "/healthz" {
+		return true
+	}
+	if localBrowser(r) {
 		return true
 	}
 	s.mu.Lock()
 	users := s.users
 	s.mu.Unlock()
-	if len(users) == 0 {
-		return isLoopbackHost(hostOnly(r.Host))
-	}
-	if !fromLoopback(r) {
+	if len(users) == 0 || !fromLoopback(r) {
 		return false
 	}
 	login := r.Header.Get(IdentityHeader)
