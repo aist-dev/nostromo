@@ -77,7 +77,8 @@ func (r *rig) waitScreen(t *testing.T, session, text string) {
 func TestNewChat(t *testing.T) {
 	for _, wrap := range []bool{false, true} {
 		r := newRig(t, wrap)
-		cwd := filepath.Join(t.TempDir(), "my dir ü")
+		base := t.TempDir()
+		cwd := filepath.Join(base, "my dir ü #(touch pwned) ##x")
 		os.MkdirAll(cwd, 0o755)
 		rec, err := r.svc.Start(context.Background(), chat.StartOptions{Cwd: cwd})
 		if err != nil {
@@ -99,6 +100,11 @@ func TestNewChat(t *testing.T) {
 			t.Fatalf("cwd: %q want %q", run.Cwd, cwd)
 		}
 		r.waitScreen(t, rec.TmuxSession, "fakeagent ready>")
+		for _, dir := range []string{base, cwd, r.home} {
+			if _, err := os.Stat(filepath.Join(dir, "pwned")); err == nil {
+				t.Fatal("a tmux format in the directory name was executed")
+			}
+		}
 	}
 }
 

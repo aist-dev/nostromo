@@ -46,7 +46,17 @@ func readFile(path string) (string, bool, error) {
 	return string(data), err == nil, err
 }
 
+// realPath follows a symlinked rc or settings file (common with dotfile
+// managers), so the target is updated and the link is kept.
+func realPath(path string) string {
+	if p, err := filepath.EvalSymlinks(path); err == nil {
+		return p
+	}
+	return path
+}
+
 func writeRC(path, content string, existed bool) error {
+	path = realPath(path)
 	if existed {
 		bak := path + ".nostromo.bak"
 		if _, err := os.Stat(bak); errors.Is(err, os.ErrNotExist) {

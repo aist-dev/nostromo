@@ -305,3 +305,18 @@ func TestMovedBinaryUpdatesOnlyOurEntry(t *testing.T) {
 		t.Fatalf("%s", data)
 	}
 }
+
+func TestHookCommandQuoting(t *testing.T) {
+	spaced := "/home/a b/.nostromo/bin/agent"
+	if got := HookCommand(spaced, "claude"); got != "'/home/a b/.nostromo/bin/agent' hook claude" {
+		t.Fatal(got)
+	}
+	p := settingsFile(t, "")
+	InstallClaudeHooks(p, spaced)
+	if ok, _ := ClaudeHooksInstalled(p); !ok {
+		t.Fatal("quoted command must be recognized as ours")
+	}
+	if changed, _ := InstallClaudeHooks(p, spaced); changed {
+		t.Fatal("idempotent with a quoted path")
+	}
+}

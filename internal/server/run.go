@@ -73,7 +73,7 @@ func Run(ctx context.Context, app *cli.App, listen string, ex Extras, stderr io.
 		logger.Printf("WARNING: listening on %s, not only on loopback; anyone who can reach it gets a terminal", listen)
 	}
 	if len(app.Config.AllowedUsers) == 0 {
-		logger.Printf("WARNING: allowed_users is empty: every device in the tailnet can use this server; run \"agent setup\" or set allowed_users in %s", app.Paths.Config())
+		logger.Printf("allowed_users is empty: only this machine can use the UI (http://127.0.0.1:%d); run \"agent setup\" or set allowed_users in %s", app.Config.Port, app.Paths.Config())
 	}
 	if err := app.Chats.EnsureTmuxConf(); err != nil {
 		return err

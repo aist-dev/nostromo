@@ -176,7 +176,9 @@ func (s *Server) refreshTailscale(ctx context.Context) {
 		return
 	}
 	names := map[string]bool{}
-	for _, n := range append([]string{st.DNSName, st.HostName}, st.CertDomains...) {
+	// Only full names: tailscale serve always uses them, and a bare host name could
+	// be rebound to 127.0.0.1 by a hostile DNS server.
+	for _, n := range append([]string{st.DNSName}, st.CertDomains...) {
 		if n != "" {
 			names[strings.ToLower(n)] = true
 		}
@@ -187,13 +189,36 @@ func (s *Server) refreshTailscale(ctx context.Context) {
 	}
 }
 
+func isLoopbackHost(h string) bool {
+	return h == "localhost" || h == "127.0.0.1" || h == "::1"
+}
+
+func fromLoopback(r *http.Request) bool {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return false
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+// identityAllowed applies allowed_users. The Tailscale identity header is only
+// trusted on loopback connections, which is where tailscale serve connects from.
+// An empty list allows local access only; "*" allows every tailnet user.
 func (s *Server) identityAllowed(r *http.Request) bool {
-	if len(s.opt.Config.AllowedUsers) == 0 || (r.Method == http.MethodGet && r.URL.Path == "/healthz") {
+	if r.Method == http.MethodGet && r.URL.Path == "/healthz" {
 		return true
 	}
+	users := s.opt.Config.AllowedUsers
+	if len(users) == 0 {
+		return isLoopbackHost(hostOnly(r.Host))
+	}
+	if !fromLoopback(r) {
+		return false
+	}
 	login := r.Header.Get(IdentityHeader)
-	for _, u := range s.opt.Config.AllowedUsers {
-		if login != "" && strings.EqualFold(login, u) {
+	for _, u := range users {
+		if u == "*" || (login != "" && strings.EqualFold(login, u)) {
 			return true
 		}
 	}
@@ -204,7 +229,7 @@ func needsOriginCheck(r *http.Request) bool {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		return true
 	}
-	return strings.EqualFold(r.Header.Get("Upgrade"), "websocket")
+	return strings.HasSuffix(r.URL.Path, "/tty") || r.Header.Get("Upgrade") != ""
 }
 
 func originAllowed(r *http.Request) bool {
@@ -216,15 +241,9 @@ func originAllowed(r *http.Request) bool {
 	if err != nil || u.Host == "" {
 		return false
 	}
-	host := strings.ToLower(u.Host)
-	if host == strings.ToLower(r.Host) {
-		return true
-	}
-	if fh := r.Header.Get("X-Forwarded-Host"); fh != "" && host == strings.ToLower(fh) {
-		return true
-	}
-	// tailscale serve terminates TLS on 443 and may forward the bare host name.
-	return hostOnly(u.Host) == hostOnly(r.Host) && (u.Port() == "" || u.Port() == "443") && u.Scheme == "https"
+	// Exact host and port: another app on the same machine name (for example on
+	// https port 443 while nostromo is served on 8443) must not get in.
+	return strings.EqualFold(u.Host, r.Host)
 }
 
 // --- responses ---

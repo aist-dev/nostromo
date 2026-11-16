@@ -157,6 +157,12 @@ func (in *Installer) Setup(ctx context.Context, o Options) error {
 // whether the installed binary is new since the service last started, which is
 // always the case when setup runs from it (install.sh puts it in place first).
 func (in *Installer) files(o Options, r *report) (bool, error) {
+	if err := os.MkdirAll(in.Paths.Home, 0o700); err != nil {
+		return false, err
+	}
+	if err := os.Chmod(in.Paths.Home, 0o700); err != nil {
+		return false, err
+	}
 	for _, d := range []string{in.Paths.Bin(), in.Paths.Chats(), in.Paths.Logs()} {
 		if err := os.MkdirAll(d, 0o700); err != nil {
 			return false, err

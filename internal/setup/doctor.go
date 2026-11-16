@@ -112,7 +112,7 @@ func (in *Installer) Checks(ctx context.Context) []Check {
 	in.checkTailscale(ctx, cfg, add)
 
 	if len(cfg.AllowedUsers) == 0 {
-		add("allowed_users", Warn, "empty: every device in the tailnet can use the UI", "agent setup (fills in your Tailscale login), or edit "+in.Paths.Config())
+		add("allowed_users", Warn, "empty: the UI only works on this machine", "agent setup (fills in your Tailscale login), or edit "+in.Paths.Config())
 	} else {
 		add("allowed_users", Pass, strings.Join(cfg.AllowedUsers, ", "), "")
 	}

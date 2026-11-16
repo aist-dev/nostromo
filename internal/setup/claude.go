@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/aist-dev/nostromo/internal/adapter"
 	"github.com/aist-dev/nostromo/internal/config"
 )
 
@@ -18,11 +19,12 @@ var ClaudeHookEvents = []string{"SessionStart", "UserPromptSubmit"}
 var ErrInvalidSettings = errors.New("settings file is not valid JSON")
 
 // HookCommand is the command written into agent settings for an adapter.
-func HookCommand(binary, adapter string) string {
-	return binary + " hook " + adapter
+func HookCommand(binary, adapterName string) string {
+	return adapter.ShellQuote(binary) + " hook " + adapterName
 }
 
 func isOurHook(cmd, adapter string) bool {
+	cmd = strings.ReplaceAll(cmd, "'", "")
 	return strings.HasSuffix(cmd, "/.nostromo/bin/agent hook "+adapter)
 }
 
@@ -59,6 +61,7 @@ func readSettings(path string) (*object, bool, error) {
 }
 
 func writeSettings(path string, o *object, existed bool) error {
+	path = realPath(path)
 	data, err := o.indent()
 	if err != nil {
 		return err

@@ -72,7 +72,7 @@ default_agent = "claude"
 repo = "aist-dev/nostromo"  # where releases come from
 check_updates = true        # ask GitHub for a new version once a day
 auto_update = false
-allowed_users = []          # Tailscale logins allowed to use the UI; filled in by "agent setup"
+allowed_users = []          # Tailscale logins allowed to use the UI ("*" = anyone in the tailnet); empty = this machine only
 peers = []                  # other machines for the UI switcher, e.g. ["mac-mini", "linux-box"]
 
 [agents.claude]

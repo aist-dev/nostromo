@@ -48,6 +48,7 @@ sha256() {
 install_binary() {
   # install_binary <file> <home>: puts the binary in place atomically.
   mkdir -p "$2/bin"
+  chmod 700 "$2"
   cp "$1" "$2/bin/agent.new"
   chmod 755 "$2/bin/agent.new"
   mv -f "$2/bin/agent.new" "$2/bin/agent"

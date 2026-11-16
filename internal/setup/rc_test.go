@@ -121,6 +121,23 @@ func TestBlocks(t *testing.T) {
 	}
 }
 
+func TestSymlinkedRCIsKept(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "dotfiles", "bashrc")
+	write(t, target, "alias agent='x'\n")
+	link := filepath.Join(dir, ".bashrc")
+	os.Symlink(target, link)
+	if _, err := DisableAgentAlias(link); err != nil {
+		t.Fatal(err)
+	}
+	if fi, _ := os.Lstat(link); fi.Mode()&os.ModeSymlink == 0 {
+		t.Fatal("the symlink was replaced by a file")
+	}
+	if !strings.Contains(read(t, target), DisabledPrefix) {
+		t.Fatal("the target was not updated")
+	}
+}
+
 func TestRCFileForShell(t *testing.T) {
 	for shell, want := range map[string]string{"/bin/zsh": "/h/.zshrc", "/usr/bin/fish": "/h/.config/fish/config.fish", "/bin/bash": "/h/.bashrc", "": "/h/.bashrc"} {
 		if got := RCFileForShell("/h", shell); got != want {

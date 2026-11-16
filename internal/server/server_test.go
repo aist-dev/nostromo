@@ -342,7 +342,7 @@ func TestHostCheck(t *testing.T) {
 	r := newRig(t, nil)
 	for host, want := range map[string]int{
 		"localhost:8787": 200, "127.0.0.1": 200, "[::1]:8787": 200,
-		"box.tail1.ts.net": 200, "BOX.tail1.ts.net:443": 200, "box": 200,
+		"box.tail1.ts.net": 200, "BOX.tail1.ts.net:443": 200, "box": 403,
 		"evil.example.com": 403, "box.tail1.ts.net.evil.com": 403,
 	} {
 		if res := r.do(t, "GET", "/healthz", nil, map[string]string{"Host": host}); res.code != want {
@@ -381,7 +381,7 @@ func TestHostCheckWithoutTailscale(t *testing.T) {
 }
 
 func TestOriginCheck(t *testing.T) {
-	r := newRig(t, nil)
+	r := newRig(t, func(o *Options) { o.Config.AllowedUsers = []string{"*"} })
 	c := r.create(t)
 	path := "/api/chats/" + c.ID
 	cases := []struct {
@@ -392,8 +392,10 @@ func TestOriginCheck(t *testing.T) {
 		{map[string]string{"Origin": "https://evil.example.com"}, 403},
 		{map[string]string{"Origin": "null"}, 403},
 		{map[string]string{"Origin": "::bad"}, 403},
-		{map[string]string{"Origin": "https://box.tail1.ts.net", "X-Forwarded-Host": "box.tail1.ts.net"}, 200},
+		{map[string]string{"Origin": "https://box.tail1.ts.net", "X-Forwarded-Host": "box.tail1.ts.net"}, 403},
 		{map[string]string{"Origin": "https://box.tail1.ts.net", "Host": "box.tail1.ts.net"}, 200},
+		{map[string]string{"Origin": "https://box.tail1.ts.net:8443", "Host": "box.tail1.ts.net:8443"}, 200},
+		{map[string]string{"Origin": "https://box.tail1.ts.net", "Host": "box.tail1.ts.net:8443"}, 403},
 		{map[string]string{"Origin": "http://box.tail1.ts.net:8080", "Host": "box.tail1.ts.net"}, 403},
 	}
 	for _, c := range cases {
@@ -401,9 +403,11 @@ func TestOriginCheck(t *testing.T) {
 			t.Errorf("%v: %d want %d", c.hdr, res.code, c.want)
 		}
 	}
-	// A GET with Upgrade: websocket is checked too.
-	if res := r.do(t, "GET", path+"/tty", nil, map[string]string{"Upgrade": "websocket", "Origin": "https://evil.example.com"}); res.code != 403 {
-		t.Fatalf("websocket origin: %d", res.code)
+	// Every request to /tty is checked, whatever its Upgrade header says.
+	for _, up := range []string{"websocket", "x, websocket", ""} {
+		if res := r.do(t, "GET", path+"/tty", nil, map[string]string{"Upgrade": up, "Origin": "https://evil.example.com"}); res.code != 403 {
+			t.Fatalf("tty origin with Upgrade %q: %d", up, res.code)
+		}
 	}
 }
 
@@ -420,6 +424,31 @@ func TestAllowedUsers(t *testing.T) {
 	}
 	if res := r.do(t, "GET", "/healthz", nil, nil); res.code != 200 {
 		t.Fatalf("healthz stays open: %d", res.code)
+	}
+	star := newRig(t, func(o *Options) { o.Config.AllowedUsers = []string{"*"} })
+	if res := star.do(t, "GET", "/api/state", nil, map[string]string{"Host": "box.tail1.ts.net"}); res.code != 200 {
+		t.Fatalf("* allows every tailnet user: %d", res.code)
+	}
+	// The identity header is not trusted from a non-loopback connection.
+	req := httptest.NewRequest("GET", "/api/state", nil)
+	req.RemoteAddr = "100.64.0.9:5555"
+	req.Header.Set(IdentityHeader, "me@example.com")
+	if r.srv.identityAllowed(req) {
+		t.Fatal("identity from a remote connection must be ignored")
+	}
+	req.RemoteAddr = "garbage"
+	if r.srv.identityAllowed(req) {
+		t.Fatal("unparsable remote address")
+	}
+}
+
+func TestEmptyAllowedUsersIsLocalOnly(t *testing.T) {
+	r := newRig(t, nil)
+	if res := r.do(t, "GET", "/api/state", nil, map[string]string{"Host": "localhost:8787"}); res.code != 200 {
+		t.Fatalf("local: %d", res.code)
+	}
+	if res := r.do(t, "GET", "/api/state", nil, map[string]string{"Host": "box.tail1.ts.net"}); res.code != 403 {
+		t.Fatalf("tailnet name with empty allowed_users: %d", res.code)
 	}
 }
 

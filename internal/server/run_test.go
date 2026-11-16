@@ -74,7 +74,7 @@ func TestRunServesAndShutsDown(t *testing.T) {
 		t.Fatal(err)
 	}
 	logData, _ := os.ReadFile(filepath.Join(home, ".nostromo", "logs", "server.log"))
-	for _, want := range []string{"allowed_users is empty", "listening on", "shutting down"} {
+	for _, want := range []string{"only this machine can use the UI", "listening on", "shutting down"} {
 		if !strings.Contains(string(logData), want) {
 			t.Errorf("log lacks %q:\n%s", want, logData)
 		}

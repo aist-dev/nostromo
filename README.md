@@ -111,7 +111,7 @@ default_agent = "claude"
 repo = "aist-dev/nostromo"
 check_updates = true        # look for a new release once a day
 auto_update = false         # install new releases automatically
-allowed_users = []          # Tailscale logins allowed to use the UI; set by setup
+allowed_users = []          # Tailscale logins allowed to use the UI; set by setup ("*" = anyone in the tailnet, empty = this machine only)
 peers = []                  # other machines shown in the UI switcher, e.g. ["mac-mini"]
 
 [agents.claude]
@@ -157,8 +157,9 @@ Uninstalling restores an `agent` alias that setup disabled, so in a new terminal
 The UI is a terminal on your machine, and the Claude adapter starts Claude Code with `--dangerously-skip-permissions`, so anyone who can use the UI can run anything as you.
 
 - The server listens on `127.0.0.1` only; `tailscale serve` provides HTTPS inside the tailnet. Tailscale Funnel (public internet) is never used, and `agent doctor` fails if it is turned on.
-- `allowed_users` restricts the UI to your Tailscale login. Requests without that identity get `403`. An empty list allows every device in the tailnet and produces a warning.
-- `Host` and `Origin` are checked on every request (DNS rebinding and cross-site requests).
+- `allowed_users` restricts the UI to your Tailscale login. The identity comes from the `Tailscale-User-Login` header that `tailscale serve` sets, and is only trusted on connections from `127.0.0.1`. An empty list means the UI works on this machine only (`http://127.0.0.1:8787`); `"*"` admits every user of the tailnet. With a login in the list, the local address answers `403` too: use the HTTPS address.
+- `Host` must be `localhost`, a loopback address or the machine's full tailnet name; `Origin` must match it exactly (scheme-independent host and port) for every request that changes something and for every terminal connection. This blocks DNS rebinding and cross-site requests, including from other apps served on the same machine name.
+- Directory names cannot inject tmux formats such as `#(...)`.
 - Only agents defined in the config can be started; the API never accepts a command.
 - The machine is assumed to be single-user: other local users could reach `127.0.0.1:8787`.
 

@@ -213,7 +213,9 @@ func NewSessionArgs(s SessionSpec) []string {
 	if rows <= 0 {
 		rows = 40
 	}
-	args := []string{"new-session", "-d", "-s", s.Name, "-c", s.Cwd,
+	// tmux expands formats in -c, so "#(cmd)" in a directory name would run cmd;
+	// "##" is a literal "#".
+	args := []string{"new-session", "-d", "-s", s.Name, "-c", strings.ReplaceAll(s.Cwd, "#", "##"),
 		"-x", strconv.Itoa(cols), "-y", strconv.Itoa(rows)}
 	for _, e := range s.Env {
 		args = append(args, "-e", e)

@@ -2,7 +2,7 @@
 
 Every version notes whether it migrates stored data (chat records or config).
 
-## Unreleased
+## 0.1.0 — 2026-11-16
 
 First version.
 

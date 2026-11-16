@@ -112,6 +112,9 @@ func TestNewSessionArgs(t *testing.T) {
 	if got != want {
 		t.Fatalf("\ngot  %s\nwant %s", got, want)
 	}
+	if a := NewSessionArgs(SessionSpec{Name: "n", Cwd: "/p/#(id)#x"}); a[5] != "/p/##(id)##x" {
+		t.Fatalf("formats in -c must be escaped: %s", a[5])
+	}
 	args = NewSessionArgs(SessionSpec{Name: "n", Cols: 80, Rows: 24})
 	if args[7] != "80" || args[9] != "24" {
 		t.Fatalf("size: %v", args)
