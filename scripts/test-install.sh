@@ -70,6 +70,21 @@ checks() {
   rm -f "$out"
 }
 
+# source_check <home>: ./install.sh --source builds the checkout and installs it.
+source_check() {
+  local home="$1" out
+  out="$(mktemp)"
+  mkdir -p "$home"
+  printf "alias agent='claude --dangerously-skip-permissions'\n" > "$home/.bashrc"
+  env -i HOME="$home" PATH="$PATH" SHELL=/bin/bash USER="$(id -un)" GOCACHE="$(go env GOCACHE)" GOMODCACHE="$(go env GOMODCACHE)" \
+    NOSTROMO_SETUP_ARGS="--no-service --no-tailscale" bash "$root/install.sh" --source > "$out" 2>&1 || { cat "$out"; fail "source install failed"; }
+  [ -x "$home/.nostromo/bin/agent" ] || fail "source build not installed"
+  [ "$(readlink "$home/.local/bin/agent")" = "$home/.nostromo/bin/agent" ] || fail "symlink missing after source install"
+  grep -q '^# nostromo: disabled alias agent=' "$home/.bashrc" || fail "alias not disabled by source install"
+  rm -f "$out"
+  echo "ok: install from source"
+}
+
 main() {
   if [ "${1:-}" = "--inside" ]; then
     checks "$2" "$3" "$HOME/install-test"
@@ -96,6 +111,7 @@ main() {
 
   if [ "$container" = 0 ]; then
     checks "$good" "$bad" "$tmp/home"
+    source_check "$tmp/source-home"
     return
   fi
   command -v docker >/dev/null || fail "docker is required for --container"

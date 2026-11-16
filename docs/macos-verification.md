@@ -70,8 +70,7 @@ already falls back to `shasum`.
 ## 5. Install from source
 
 ```sh
-go build -o /tmp/agent ./cmd/agent
-/tmp/agent setup
+./install.sh --source
 ```
 
 Expected:

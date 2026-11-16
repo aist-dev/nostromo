@@ -29,16 +29,17 @@ The script downloads the release for your OS and architecture, verifies its SHA-
 
 ### Install from source
 
-Needs Go 1.25 or newer.
+Needs Go 1.25 or newer. From a clone of the repository:
 
 ```sh
 git clone https://github.com/aist-dev/nostromo.git
 cd nostromo
-go build -o /tmp/agent ./cmd/agent
-/tmp/agent setup
+./install.sh --source
 ```
 
-`setup` copies the binary into `~/.nostromo/bin/agent`, so the build output can be deleted afterwards. A source build reports its version as `dev`.
+This builds the checked-out code, installs it as `~/.nostromo/bin/agent` and runs `agent setup`, exactly like the one-line install. Run it again after `git pull` to install the new code.
+
+Both ways call the new binary by its full path, so an existing `agent` alias does not get in the way. After the first install, open a new terminal: from then on `agent` is the new command (`agent doctor`, `agent ls`, ...).
 
 ### What `agent setup` does
 

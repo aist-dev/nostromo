@@ -4,6 +4,10 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/aist-dev/nostromo/main/install.sh | bash
 #
+# From a clone of the repository (needs Go), build and install the checked-out code:
+#
+#   ./install.sh --source
+#
 # Environment:
 #   NOSTROMO_VERSION       release tag to install (default: latest)
 #   NOSTROMO_HOME          install directory (default: ~/.nostromo)
@@ -41,11 +45,44 @@ sha256() {
   fi
 }
 
+install_binary() {
+  # install_binary <file> <home>: puts the binary in place atomically.
+  mkdir -p "$2/bin"
+  cp "$1" "$2/bin/agent.new"
+  chmod 755 "$2/bin/agent.new"
+  mv -f "$2/bin/agent.new" "$2/bin/agent"
+  say "Installed $2/bin/agent ($("$2/bin/agent" version))"
+}
+
+from_source() {
+  local home="$1" src tmp version
+  src="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  if [ ! -f "$src/go.mod" ] || [ ! -d "$src/cmd/agent" ]; then
+    die "--source must be run from a clone of the repository"
+  fi
+  command -v go >/dev/null 2>&1 || die "Go is required to build from source: https://go.dev/dl/"
+  version="$(git -C "$src" describe --tags --always --dirty 2>/dev/null || echo dev)"
+  version="${version#v}"
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "$tmp"' EXIT
+  say "Building agent $version from $src"
+  CGO_ENABLED=0 go build -C "$src" -trimpath \
+    -ldflags "-s -w -X github.com/aist-dev/nostromo/internal/version.Version=$version" -o "$tmp/agent" ./cmd/agent
+  install_binary "$tmp/agent" "$home"
+  rm -rf "$tmp"
+}
+
 main() {
   local base="${NOSTROMO_DOWNLOAD_URL:-https://github.com/aist-dev/nostromo/releases}"
   local version="${NOSTROMO_VERSION:-latest}"
   local home="${NOSTROMO_HOME:-$HOME/.nostromo}"
   local os arch file url_dir tmp expected actual
+
+  if [ "${1:-}" = "--source" ]; then
+    from_source "$home"
+    # shellcheck disable=SC2086
+    NOSTROMO_HOME="$home" exec "$home/bin/agent" setup ${NOSTROMO_SETUP_ARGS:-}
+  fi
 
   for tool in curl tar awk; do
     command -v "$tool" >/dev/null 2>&1 || die "$tool is required"
@@ -77,11 +114,7 @@ main() {
   [ "$expected" = "$actual" ] || die "checksum mismatch for $file (expected $expected, got $actual); nothing was changed"
 
   tar -xzf "$tmp/$file" -C "$tmp" agent || die "archive does not contain the agent binary"
-  mkdir -p "$home/bin"
-  cp "$tmp/agent" "$home/bin/agent.new"
-  chmod 755 "$home/bin/agent.new"
-  mv -f "$home/bin/agent.new" "$home/bin/agent"
-  say "Installed $home/bin/agent ($("$home/bin/agent" version))"
+  install_binary "$tmp/agent" "$home"
 
   # shellcheck disable=SC2086
   NOSTROMO_HOME="$home" exec "$home/bin/agent" setup ${NOSTROMO_SETUP_ARGS:-}
