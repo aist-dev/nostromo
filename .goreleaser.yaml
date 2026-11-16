@@ -1,0 +1,42 @@
+# Release build. Archive and checksum names are a contract with install.sh and
+# internal/update; TestGoreleaserContract fails if they drift.
+version: 2
+project_name: agent
+
+before:
+  hooks:
+    - go mod download
+
+builds:
+  - id: agent
+    main: ./cmd/agent
+    binary: agent
+    env:
+      - CGO_ENABLED=0
+    goos: [darwin, linux]
+    goarch: [amd64, arm64]
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X github.com/aist-dev/nostromo/internal/version.Version={{ .Version }}
+
+archives:
+  - id: agent
+    formats: [tar.gz]
+    name_template: "agent_{{ .Os }}_{{ .Arch }}"
+    files:
+      - none*
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+changelog:
+  disable: true
+
+release:
+  github:
+    owner: aist-dev
+    name: nostromo
+  draft: false
+  prerelease: auto

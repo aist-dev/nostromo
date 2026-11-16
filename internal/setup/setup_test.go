@@ -47,9 +47,12 @@ func (f *fakeService) Install(_ context.Context, s ServiceSpec, start bool) (boo
 	}
 	return changed, nil
 }
-func (f *fakeService) Restart(context.Context) error      { f.restarts++; return nil }
-func (f *fakeService) Running(context.Context) bool       { return f.running }
-func (f *fakeService) Uninstall(context.Context) error    { f.installed, f.running = false, false; return nil }
+func (f *fakeService) Restart(context.Context) error { f.restarts++; return nil }
+func (f *fakeService) Running(context.Context) bool  { return f.running }
+func (f *fakeService) Uninstall(context.Context) error {
+	f.installed, f.running = false, false
+	return nil
+}
 func (f *fakeService) EnableLinger(context.Context) error { return f.lingerErr }
 
 type fakeTS struct {
@@ -322,8 +325,8 @@ func TestSetupStops(t *testing.T) {
 	}
 	f = newFixture(t)
 	os.MkdirAll(filepath.Join(f.home, ".local", "bin"), 0o755)
-	os.Symlink("/opt/cursor/agent", filepath.Join(f.home, ".local", "bin", "agent"))
-	if err := f.in.Setup(ctx, Options{}); err == nil || !strings.Contains(err.Error(), "/opt/cursor/agent") {
+	os.Symlink("/opt/other/agent", filepath.Join(f.home, ".local", "bin", "agent"))
+	if err := f.in.Setup(ctx, Options{}); err == nil || !strings.Contains(err.Error(), "/opt/other/agent") {
 		t.Fatalf("foreign symlink: %v", err)
 	}
 	// Another name works.
@@ -641,6 +644,10 @@ func TestNewInstaller(t *testing.T) {
 	in, err := NewInstaller(env)
 	if err != nil || in.Shell != "/bin/sh" || in.Exe == "" || in.Tmux == nil || in.Service == nil {
 		t.Fatalf("%+v %v", in, err)
+	}
+	vars["NOSTROMO_SERVICE"] = "none"
+	if in, _ := NewInstaller(env); in.Service != nil {
+		t.Fatal("NOSTROMO_SERVICE=none must disable the service")
 	}
 	vars["NOSTROMO_HOME"] = ""
 	vars["HOME"] = ""

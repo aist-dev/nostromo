@@ -368,7 +368,10 @@ func TestHostCheckWithoutTailscale(t *testing.T) {
 	}
 	calls := 0
 	r2 := newRig(t, func(o *Options) {
-		o.TailscaleStatus = func(context.Context) (tailscale.Status, error) { calls++; return tailscale.Status{}, errors.New("down") }
+		o.TailscaleStatus = func(context.Context) (tailscale.Status, error) {
+			calls++
+			return tailscale.Status{}, errors.New("down")
+		}
 	})
 	r2.do(t, "GET", "/healthz", nil, map[string]string{"Host": "a.example"})
 	r2.do(t, "GET", "/healthz", nil, map[string]string{"Host": "b.example"})

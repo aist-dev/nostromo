@@ -60,8 +60,8 @@ type report struct {
 
 func (r *report) ok(format string, a ...any)   { fmt.Fprintf(r.out, "  ✓ "+format+"\n", a...) }
 func (r *report) warn(format string, a ...any) { fmt.Fprintf(r.out, "  ! "+format+"\n", a...) }
-func (r *report) step(name string)            { fmt.Fprintf(r.out, "%s\n", name) }
-func (r *report) need(s string)               { r.todo = append(r.todo, s) }
+func (r *report) step(name string)             { fmt.Fprintf(r.out, "%s\n", name) }
+func (r *report) need(s string)                { r.todo = append(r.todo, s) }
 
 func (in *Installer) linkPath() string {
 	name := in.CmdName

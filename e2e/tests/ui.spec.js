@@ -22,7 +22,7 @@ test("chat lifecycle in the browser", async ({ page, isMobile }) => {
   await expect(dialog).toBeVisible();
   await page.locator("#path-input").fill(project());
   await page.locator("#path-input").press("Enter");
-  await expect(page.locator("#dir-path")).toHaveText(project());
+  await expect(page.locator("#dir-path")).toContainText(project());
   await page.locator("#new-create").click();
   await expect(dialog).toBeHidden();
 

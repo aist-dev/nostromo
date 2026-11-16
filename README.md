@@ -1,0 +1,176 @@
+# nostromo
+
+Run CLI coding agents in tmux on your own machines and reach every chat from any device in your tailnet.
+
+- `agent` in any directory starts a new chat (Claude Code by default) in a tmux session and attaches your terminal to it.
+- `agent serve` (installed as a background service) shows all chats in a browser, grouped by directory, with a real terminal per chat. It works on a phone too.
+- Chats live in tmux, not in the server: closing the terminal, restarting the server or updating nostromo never interrupts an agent. After a reboot a chat can be resumed with one click.
+- HTTPS comes from `tailscale serve`; nothing is exposed outside your tailnet.
+
+One static Go binary, no runtime dependencies besides tmux. Linux and macOS.
+
+## Requirements
+
+| Requirement | Why | How |
+| --- | --- | --- |
+| tmux 3.2 or newer | chats run in tmux | `sudo apt install tmux` / `brew install tmux` |
+| Claude Code (`claude`), logged in | the default agent | see the Claude Code docs |
+| Tailscale, logged in | access from other devices | https://tailscale.com/download |
+| MagicDNS and HTTPS certificates enabled for the tailnet | the `https://<machine>.<tailnet>.ts.net` address | once per tailnet: https://login.tailscale.com/admin/dns |
+| `curl`, `tar`, `sha256sum` or `shasum` | the installer | part of the system |
+
+## Install
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/aist-dev/nostromo/main/install.sh | bash
+```
+
+The script downloads the release for your OS and architecture, verifies its SHA-256 checksum, puts it in `~/.nostromo/bin/agent` and runs `agent setup`. `setup` is safe to run again at any time.
+
+### Install from source
+
+Needs Go 1.25 or newer.
+
+```sh
+git clone https://github.com/aist-dev/nostromo.git
+cd nostromo
+go build -o /tmp/agent ./cmd/agent
+/tmp/agent setup
+```
+
+`setup` copies the binary into `~/.nostromo/bin/agent`, so the build output can be deleted afterwards. A source build reports its version as `dev`.
+
+### What `agent setup` does
+
+1. Creates `~/.nostromo/` with `config.toml`, `tmux.conf`, `chats/` and `logs/`.
+2. Puts the `agent` command on `PATH` as the symlink `~/.local/bin/agent`, and adds `~/.local/bin` to `PATH` in your shell rc file if needed.
+   - An existing shell alias named `agent` (for example `alias agent='claude --dangerously-skip-permissions'`) is commented out with the prefix `# nostromo: disabled `; a backup of the rc file is saved as `<file>.nostromo.bak`. The new command keeps the same permission level.
+   - If another *program* already occupies `~/.local/bin/agent`, setup stops. Remove that program, or install under another name: `NOSTROMO_CMD=ag agent setup`.
+3. Checks tmux and the agent commands in a login shell.
+4. Adds two hooks to `~/.claude/settings.json` (`SessionStart`, `UserPromptSubmit`) that keep each chat's resume id current and title it from the first prompt. Other settings and hooks are preserved; a backup is saved as `settings.json.nostromo.bak`. The hooks do nothing for a plain `claude` started without `agent`.
+5. Installs and starts the background service: a systemd user unit `nostromo.service` on Linux (plus `loginctl enable-linger` so it starts at boot without a login), a launchd agent `com.nostromo.server` on macOS.
+6. Configures `tailscale serve --bg --https=443 http://127.0.0.1:8787` (port 8443 if 443 is used by something else) and limits the UI to your Tailscale login (`allowed_users`).
+7. Prints the address and runs `agent doctor`.
+
+Anything it cannot do by itself is listed at the end under **Left to do by hand**, with the exact command.
+
+### Steps that need you
+
+These need administrator rights or a browser, so `agent setup` never runs them itself. It prints the ones that apply. **If an assistant or script runs the installation for you, it must stop and ask you to run these commands; it must not run `sudo` on its own.**
+
+| When | What to run | Why |
+| --- | --- | --- |
+| tmux missing or older than 3.2 | `sudo apt install tmux` (Debian/Ubuntu), `brew install tmux` (macOS) | chats run in tmux |
+| Linux, `tailscale serve` says access denied | `sudo tailscale set --operator=$USER`, then `agent setup` again | lets your user configure `tailscale serve` without sudo |
+| Linux, setup could not enable linger | `sudo loginctl enable-linger $USER` | the service starts at boot without logging in |
+| MagicDNS or HTTPS certificates are off | enable both at https://login.tailscale.com/admin/dns, then `agent setup` again | the HTTPS address needs them |
+| Tailscale not installed or not logged in | install it from https://tailscale.com/download, run `tailscale up`, then `agent setup` again | access from other devices |
+| `claude` not found | install and log in to Claude Code | the default agent |
+| `~/.claude/settings.json` is not valid JSON | fix the file, then `agent setup` again (or paste the printed snippet) | setup never edits a file it cannot parse |
+
+After the first install, open a new terminal so the `PATH` change and the disabled alias take effect.
+
+## Use
+
+```sh
+agent                       # new chat in the current directory, attached
+agent -a codex              # another agent from the config
+agent --cwd ~/src/api --title "Fix retries" --detach
+agent ls                    # chats by directory, with status
+agent attach 550e           # any unambiguous id prefix
+agent resume 550e           # restart a stopped chat with its conversation
+agent stop 550e             # end the tmux session, keep the chat
+agent rm 550e               # end the session and delete the chat
+```
+
+Detach from a chat with the tmux prefix `Ctrl-b d`; the agent keeps running. Running `agent` inside a chat switches to the new chat instead of nesting tmux.
+
+Chats run on their own tmux socket, so they do not show up in a plain `tmux ls`; use `agent ls` or `tmux -L nostromo ls`.
+
+In the browser, open the address printed by setup (`https://<machine>.<tailnet>.ts.net`). On a phone, the bottom bar has Esc, Tab, Ctrl+C, arrows and history scrolling, and the input line supports autocorrect and dictation.
+
+Deleting a chat removes only nostromo's record. The agent's own history stays where the agent keeps it (for Claude Code, `claude --resume` still finds it).
+
+### Status
+
+| Status | Meaning |
+| --- | --- |
+| running | the tmux session is alive |
+| failed | the agent exited with an error; its last screen is kept until you resume or delete the chat |
+| stopped | no tmux session (stopped, exited cleanly, or the machine rebooted); Resume continues the conversation |
+
+## Configuration
+
+`~/.nostromo/config.toml`; a missing key falls back to its default.
+
+```toml
+port = 8787
+tmux_socket = "nostromo"
+default_agent = "claude"
+repo = "aist-dev/nostromo"
+check_updates = true        # look for a new release once a day
+auto_update = false         # install new releases automatically
+allowed_users = []          # Tailscale logins allowed to use the UI; set by setup
+peers = []                  # other machines shown in the UI switcher, e.g. ["mac-mini"]
+
+[agents.claude]
+start      = "claude --dangerously-skip-permissions --session-id {id}"
+resume     = "claude --dangerously-skip-permissions --resume {resume_id}"
+hooks      = "claude"
+shell_wrap = true           # run through your login shell, so PATH and rc variables match a terminal
+```
+
+Placeholders: `{id}` (chat id), `{resume_id}` (the agent's session id), `{cwd}`. Values are shell-quoted. A new CLI agent needs only a new `[agents.<name>]` block; check its documentation for the right start and resume commands. An agent that cannot take a session id at start can still resume with whatever it supports (for example "the last session in this directory").
+
+## Updates
+
+```sh
+agent update            # install the latest release
+agent update --check    # only report
+agent update --version v1.2.3
+agent update --rollback # go back to the previous version
+```
+
+An update verifies the checksum, checks that the new binary reports the expected version, swaps it atomically, migrates data (`agent setup --upgrade`) and restarts the service. If the new server does not come up within 10 seconds, the previous binary is restored automatically. Running agents are never interrupted. The UI shows when an update is available and can start it.
+
+## Check and remove
+
+```sh
+agent doctor               # every check with a fix command for anything wrong
+agent uninstall            # remove service, tailscale serve config, hooks, command, rc edits
+agent uninstall --purge    # also delete ~/.nostromo with all chat records
+```
+
+`uninstall` restores an `agent` alias that setup disabled. Running tmux sessions are left alone.
+
+## Security
+
+The UI is a terminal on your machine, and the Claude adapter starts Claude Code with `--dangerously-skip-permissions`, so anyone who can use the UI can run anything as you.
+
+- The server listens on `127.0.0.1` only; `tailscale serve` provides HTTPS inside the tailnet. Tailscale Funnel (public internet) is never used, and `agent doctor` fails if it is turned on.
+- `allowed_users` restricts the UI to your Tailscale login. Requests without that identity get `403`. An empty list allows every device in the tailnet and produces a warning.
+- `Host` and `Origin` are checked on every request (DNS rebinding and cross-site requests).
+- Only agents defined in the config can be started; the API never accepts a command.
+- The machine is assumed to be single-user: other local users could reach `127.0.0.1:8787`.
+
+## How it works
+
+- `~/.nostromo/chats/<id>.json` lists the chats (written by the launcher, so chats started while the server is down still show up).
+- tmux on the socket `nostromo` knows which chats are running: session `agent-<id8>` with the option `@nostromo_chat`.
+- The agent keeps the conversation itself.
+
+The design, decisions and test plan are in [docs/PLAN.md](docs/PLAN.md).
+
+## Development
+
+```sh
+go test ./...                                    # unit tests, no tmux needed
+go test -race -tags integration ./...            # plus integration tests on a private tmux socket
+go test -race -tags integration -coverpkg=./internal/... -coverprofile=coverage.out ./... && scripts/check-coverage.sh coverage.out 90
+npm --prefix e2e ci && npx --prefix e2e playwright install chromium && npm --prefix e2e test   # browser test
+scripts/test-install.sh                          # installer against a fake release server
+```
+
+Tests never touch the real `~/.nostromo` or your tmux sessions. Releases are built by GoReleaser from `v*` tags; see [docs/release-checklist.md](docs/release-checklist.md).
+
+Third-party code: the vendored xterm.js in `internal/server/web/vendor` is MIT licensed by its authors.

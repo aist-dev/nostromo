@@ -11,6 +11,8 @@ import (
 
 	"github.com/aist-dev/nostromo/internal/cli"
 	"github.com/aist-dev/nostromo/internal/config"
+	"github.com/aist-dev/nostromo/internal/migrate"
+	"github.com/aist-dev/nostromo/internal/store"
 	"github.com/aist-dev/nostromo/internal/tailscale"
 	"github.com/aist-dev/nostromo/internal/tmux"
 	"github.com/aist-dev/nostromo/internal/version"
@@ -42,14 +44,17 @@ func NewInstaller(env cli.Env) (*Installer, error) {
 		Exe: exe, Version: version.Version, Out: env.Stdout,
 		Tmux: env.NewTmux(cfg, paths), Run: tmux.ExecRunner{},
 		Health: HTTPHealth, HTTPSCheck: HTTPSReachable,
+		Migrate: func() ([]string, error) { return migrate.Run(paths, migrate.All, store.SchemaVersion) },
 	}
 	if in.Shell == "" {
 		in.Shell = "/bin/sh"
 	}
-	switch runtime.GOOS {
-	case "linux":
+	switch {
+	case env.Getenv("NOSTROMO_SERVICE") == "none":
+		// No background service (containers, tests): agent serve is run by hand.
+	case runtime.GOOS == "linux":
 		in.Service = &Systemd{Home: in.Home, User: username, Run: tmux.ExecRunner{}}
-	case "darwin":
+	case runtime.GOOS == "darwin":
 		in.Service = &Launchd{Home: in.Home, UID: os.Getuid(), Run: tmux.ExecRunner{}}
 	}
 	if ts, err := tailscale.Find(); err == nil {

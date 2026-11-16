@@ -107,6 +107,7 @@ Tailnet requirement: MagicDNS and HTTPS certificates enabled in the Tailscale ad
 - **Launching from inside tmux.** If `$TMUX` points at the nostromo socket (running `agent` inside a chat), use `switch-client`. Inside any other tmux, attach normally; this nests tmux, and the launcher prints a one-line hint about the doubled prefix.
 - **The agent command runs through the user's login shell**: `$SHELL -lic 'exec <command>'`. Otherwise a chat started by the server under launchd or systemd would not find `claude` in `PATH` or see variables from `.zshrc`. The adapter option `shell_wrap = false` runs the command directly.
 - **`remain-on-exit failed`** on the session. If the agent exits non-zero, the pane stays and the error is visible in the browser. On a clean exit the session closes.
+- **tmux can miss SIGCHLD.** On tmux 3.4 a pane whose process exited is sometimes marked dead with no exit status while the process stays a zombie, so `remain-on-exit failed` cannot tell success from failure. When `list-panes` shows such a pane, nostromo runs `tmux run-shell true`: the job's exit makes the server handle SIGCHLD again, which reaps every zombie, and the panes are listed once more.
 - **Restarting the server must not kill tmux.** The systemd unit must have `KillMode=process`, the launchd plist `AbandonProcessGroup = true`. A dedicated acceptance test covers this, because update safety depends on it.
 
 ## 4. Files and data model
@@ -123,6 +124,7 @@ Everything lives under `~/.nostromo/`, identically on macOS and Linux. Removing 
   chats/.lock        lock file for record changes
   logs/server.log    server log, size-based rotation (5 MB, 3 files)
   logs/hook.log      hook errors
+  logs/update.log    output of updates started from the UI
   update.json        cache of the last update check
 ```
 
@@ -224,12 +226,13 @@ One function, `chat.Start`, runs this sequence. Both the launcher and the server
 1. Check: the directory exists, the adapter exists in the config, tmux is present and at least 3.2.
 2. Generate `id` (UUID v4). Build the record with `resume_id = id`. Write the file.
 3. Build the agent command from the `start` template, substituting shell-escaped values.
-4. Wrap it: `env NOSTROMO_CHAT_ID=<id> NOSTROMO_HOME=<path> $SHELL -lic 'exec <command>'` (or without the shell when `shell_wrap = false`).
+4. Wrap it: `exec $SHELL -lic 'exec <command>'` (or the command alone when `shell_wrap = false`). `NOSTROMO_CHAT_ID` and `NOSTROMO_HOME` are set with `new-session -e`, so they reach the agent either way.
 5. Ensure `~/.nostromo/tmux.conf` exists. With one tmux call, create the session and set its options so they apply before the command can exit:
 
 ```text
 tmux -L nostromo -f ~/.nostromo/tmux.conf \
-     new-session -d -s agent-<id8> -c <cwd> -x <cols> -y <rows> '<wrapped command>' \; \
+     new-session -d -s agent-<id8> -c <cwd> -x <cols> -y <rows> \
+                 -e NOSTROMO_CHAT_ID=<id> -e NOSTROMO_HOME=<path> '<wrapped command>' \; \
      set-option    -t agent-<id8> @nostromo_chat <id> \; \
      set-option -w -t agent-<id8> remain-on-exit failed
 ```
@@ -362,12 +365,14 @@ Errors share one format: `{"error": {"code": "...", "message": "..."}}`. Codes: 
 
 1. Connect: `GET /api/chats/{id}/tty?cols=120&rows=40`.
 2. Chat `stopped`: the server closes the socket with code `4404`. The UI shows Resume.
-3. Otherwise the server runs `tmux -L nostromo attach-session -t <session>` in a PTY with `TERM=xterm-256color` and the requested size.
-4. Binary frames carry terminal bytes both ways.
-5. Text frames from the client are JSON commands. Currently one: `{"type": "resize", "cols": 100, "rows": 30}`.
-6. The `tmux attach` process exits (session closed): the server sends a text frame `{"type": "exit"}` and closes with code `4410`. The UI reloads `state`.
-7. Client disconnects: the server terminates the `tmux attach` process. The session and the agent keep running.
-8. Ping every 30 seconds; no reply within 60 seconds closes the connection.
+3. Chat `failed`: the server sends the pane's history and last screen (`tmux capture-pane -p -e -J -S -2000`) as one binary frame and ignores input. It does not attach: attaching at a different size makes tmux shrink the dead pane and push its last lines out of view.
+4. Otherwise (`running`) the server runs `tmux -L nostromo attach-session -t <session>` in a PTY with `TERM=xterm-256color` and the requested size.
+5. Binary frames carry terminal bytes both ways.
+6. Text frames from the client are JSON commands. Currently one: `{"type": "resize", "cols": 100, "rows": 30}`.
+7. The `tmux attach` process exits (session closed): the server sends a text frame `{"type": "exit"}` and closes with code `4410`. The UI reloads `state`.
+8. Client disconnects: the server terminates the `tmux attach` process. The session and the agent keep running.
+9. Server shutdown: every terminal connection is closed with code `1001` (going away); the UI reconnects to the new server.
+10. Ping every 30 seconds; no reply within 60 seconds closes the connection.
 
 Scrolling: `mouse on` in the nostromo tmux config makes the desktop mouse wheel scroll tmux history. For phones there are buttons calling `/scroll`: the server runs `tmux copy-mode` and `send-keys -X halfpage-up` / `halfpage-down` / `cancel`.
 
@@ -382,10 +387,12 @@ The server grants terminal access to the machine, so the rules are strict and ea
 - Listen on `127.0.0.1` only. Any other address requires the explicit `--listen` flag and logs a warning.
 - `Host` check: only `localhost`, `127.0.0.1` and the machine's tailnet name are allowed. Anything else gets `403`. This defends against DNS rebinding.
 - `Origin` check on every request except side-effect-free `GET`, and on the WebSocket upgrade: the origin must match `Host` or `X-Forwarded-Host`.
-- `allowed_users`: requests proxied by `tailscale serve` carry the Tailscale identity header (`Tailscale-User-Login`; verify against the Tailscale Serve docs during implementation). When the list is non-empty, the login must be in it, otherwise `403`; requests without the header coming through the proxy are rejected too. `agent setup` fills the list with the login of the current Tailscale user (`tailscale status --json`). When the list is empty, the server works but logs a warning at startup, and `agent doctor` reports it.
+- `allowed_users`: requests proxied by `tailscale serve` carry the Tailscale identity header `Tailscale-User-Login` (Tailscale strips a client-supplied copy). When the list is non-empty, every request except `GET /healthz` must carry a login from the list, otherwise `403`. This includes requests to `127.0.0.1` directly: the server cannot tell a local browser from a proxied request without a header, so a local browser uses the HTTPS address too. `agent setup` fills the list with the login of the current Tailscale user (`tailscale status --json`). When the list is empty, the server works but logs a warning at startup, and `agent doctor` reports it.
 - Tailscale Funnel (public internet) is never used. `agent doctor` warns if Funnel is enabled for this port.
 - Limits: request body 1 MB, WebSocket frame 1 MB, header read timeouts.
 - Only agents from the config can be started. No arbitrary command can be passed through the API.
+- The page is served with a Content-Security-Policy that allows only its own scripts and connections, plus `X-Frame-Options: DENY`.
+- The machine is assumed to be single-user: another local account could reach `127.0.0.1:<port>`.
 
 ## 8. UI
 
@@ -430,7 +437,7 @@ Top bar: hamburger (phone), title (tap to rename), status, menu: Stop, Delete, R
 - WebSocket drop: automatic reconnect after 1, 2, 5 seconds, then every 5. Screen contents come back from tmux on re-attach.
 - A change of `version` in `state` (server updated): the page reloads itself.
 - "New chat" dialog: agent choice (when there is more than one), recent directories, directory navigation via `/api/dirs`, a field for typing a path.
-- Fonts and xterm.js are embedded in the binary. The page makes no external requests.
+- xterm.js is embedded in the binary; the terminal uses the system monospace fonts. The page makes no external requests.
 
 ## 9. Installing on a new machine
 
@@ -467,7 +474,9 @@ Running `install.sh` again on an installed system is safe: it installs the lates
 
 ### 9.3. Step B: `agent setup`
 
-Every step is idempotent and prints its result. A failing optional step (Tailscale, hooks) does not stop the installation: at the end it prints what is left to do manually, with the exact command.
+Every step is idempotent and prints its result. A failing optional step (Tailscale, hooks) does not stop the installation: at the end it prints what is left to do manually, with the exact command. `setup` never runs `sudo`.
+
+Flags: `--no-service` and `--no-tailscale` skip those steps (containers, CI); `--upgrade` is the mode used by `agent update` (section 10). `NOSTROMO_SERVICE=none` disables the service for every command, including `agent update`.
 
 1. **Directories and config.** Create `~/.nostromo/{bin,chats,logs}`. Write the default `config.toml` only if missing. Write `tmux.conf`.
 2. **Command on `PATH`.** Resolve name conflicts per 5.3: comment out an `agent` alias in rc files; stop if another program occupies the symlink location. Symlink `~/.local/bin/agent`. If `~/.local/bin` is not on `PATH`, add a line to the current shell's rc file (`.zshrc`, `.bashrc`, `config.fish`) between the markers `# >>> nostromo >>>` and `# <<< nostromo <<<`.
@@ -521,7 +530,7 @@ Flags: `--check` only reports whether a new version exists; `--version vX.Y.Z` i
 
 `POST /api/update` does not update inside the server process. It starts a separate `agent update` process in a new session (`setsid`) and returns `202` immediately; otherwise restarting the server would kill its own updater. The page waits for `version` in `state` to change and reloads.
 
-`check_updates = false` disables all requests to GitHub. The repository is public, so no token is needed; `NOSTROMO_GITHUB_TOKEN` is used if set (for forks in private repositories or rate limits).
+`check_updates = false` disables all requests to GitHub. The repository is public, so no token is needed; `NOSTROMO_GITHUB_TOKEN` is used if set (for forks in private repositories or rate limits). `NOSTROMO_API_URL` and `NOSTROMO_DOWNLOAD_URL` (shared with `install.sh`) point the updater at a mirror or a test server.
 
 ### 10.3. Cross-version compatibility
 
@@ -610,11 +619,14 @@ Nine stages, each ending in a working, tested result. The order makes `agent` us
 ### 12.1. Repository layout
 
 ```text
-cmd/agent/main.go          subcommand parsing, nothing else
-internal/config/           config and defaults
+cmd/agent/main.go          wires the subcommands together, nothing else
+internal/cli/              argument parsing, launcher commands
+internal/config/           config, defaults and paths
 internal/store/            chat records
 internal/adapter/          agent command templates
 internal/tmux/             tmux wrapper (interface + implementation)
+internal/tmux/faketmux/    in-memory tmux for unit tests
+internal/tailscale/        tailscale CLI wrapper
 internal/chat/             Start, Resume, Stop, Delete
 internal/state/            statuses, grouping, sorting
 internal/server/           HTTP, WebSocket, PTY
@@ -622,13 +634,16 @@ internal/server/web/       index.html, app.js, app.css, vendor/xterm (embed)
 internal/hook/             agent hook handlers
 internal/setup/            setup, doctor, uninstall, services, Tailscale
 internal/update/           update check and install
-internal/migrate/          record and config migrations
+internal/migrate/          record migrations
+internal/testutil/         helpers for integration tests
+internal/version/          version set at link time
 testdata/fakeagent/        fake agent for tests
+scripts/                   coverage gate, installer test
 e2e/                       Playwright scenario
 install.sh
 .goreleaser.yaml
 .github/workflows/ci.yml, release.yml
-docs/release-checklist.md
+docs/release-checklist.md, docs/macos-verification.md
 CHANGELOG.md, README.md
 ```
 
@@ -642,15 +657,17 @@ CHANGELOG.md, README.md
 
 ### 12.3. Stages
 
-- [ ] **Stage 1. Skeleton.** Go module, `cmd/agent` with the `version` subcommand, `config` and `store` packages with tests, CI with a Linux and macOS matrix, coverage threshold. Done when `go test ./...` is green on both OSes.
-- [ ] **Stage 2. tmux and adapters.** `adapter` and `tmux` packages, fake agent, tmux version check. Done when unit tests pass and an integration test creates and finds a session on a separate socket.
-- [ ] **Stage 3. Launcher.** `chat` and `state` packages; `agent`, `ls`, `attach`, `resume`, `stop`, `rm`. Done when integration tests 1–7, 15, 16 pass, and manually: `agent` in any directory opens Claude Code in tmux, and after `tmux -L nostromo kill-server` `agent resume <id>` continues the conversation.
-- [ ] **Stage 4. Server API.** `agent serve`, every endpoint except `/tty` and `/update`; security checks from 7.4. Done when `server` tests cover every endpoint and error code, and integration test 8 passes.
-- [ ] **Stage 5. Terminal.** PTY and WebSocket, `/scroll`. Done when integration tests 9–13 pass.
-- [ ] **Stage 6. UI.** The page per section 8, embedded in the binary. Done when the Playwright scenario passes at both screen sizes, and a manual check on a real phone: open a chat, send a message, scroll history, Resume.
-- [ ] **Stage 7. Claude Code hooks.** `agent hook claude`, `settings.json` merge. Done when `hook` tests and integration test 14 pass, and manually: after `/clear` in Claude Code the record's `resume_id` changes.
-- [ ] **Stage 8. Installation.** `setup`, `doctor`, `uninstall`, launchd and systemd services, `tailscale serve`, `install.sh`. Done when the container installer test passes and the acceptance in 9.6 passes on one Mac and one Linux machine.
-- [ ] **Stage 9. Releases and updates.** GoReleaser, release workflow, `agent update` with rollback, update checks in the server and the UI button, migrations. Done when `v0.1.0` and `v0.1.1` are published; `agent update` moves from the first to the second on both OSes with an agent running, without interrupting it; a deliberately broken release rolls itself back.
+Status: all nine stages are implemented and their automated tests pass on Linux. Still open: the macOS run (`docs/macos-verification.md`), the manual checks on a real phone (stage 6) and on real machines (stage 8 acceptance), and publishing `v0.1.0` / `v0.1.1` (stage 9; the same flow is covered locally by `internal/update` integration tests).
+
+- [x] **Stage 1. Skeleton.** Go module, `cmd/agent` with the `version` subcommand, `config` and `store` packages with tests, CI with a Linux and macOS matrix, coverage threshold. Done when `go test ./...` is green on both OSes.
+- [x] **Stage 2. tmux and adapters.** `adapter` and `tmux` packages, fake agent, tmux version check. Done when unit tests pass and an integration test creates and finds a session on a separate socket.
+- [x] **Stage 3. Launcher.** `chat` and `state` packages; `agent`, `ls`, `attach`, `resume`, `stop`, `rm`. Done when integration tests 1–7, 15, 16 pass, and manually: `agent` in any directory opens Claude Code in tmux, and after `tmux -L nostromo kill-server` `agent resume <id>` continues the conversation.
+- [x] **Stage 4. Server API.** `agent serve`, every endpoint except `/tty` and `/update`; security checks from 7.4. Done when `server` tests cover every endpoint and error code, and integration test 8 passes.
+- [x] **Stage 5. Terminal.** PTY and WebSocket, `/scroll`. Done when integration tests 9–13 pass.
+- [x] **Stage 6. UI.** The page per section 8, embedded in the binary. Done when the Playwright scenario passes at both screen sizes, and a manual check on a real phone: open a chat, send a message, scroll history, Resume.
+- [x] **Stage 7. Claude Code hooks.** `agent hook claude`, `settings.json` merge. Done when `hook` tests and integration test 14 pass, and manually: after `/clear` in Claude Code the record's `resume_id` changes.
+- [x] **Stage 8. Installation.** `setup`, `doctor`, `uninstall`, launchd and systemd services, `tailscale serve`, `install.sh`. Done when the container installer test passes and the acceptance in 9.6 passes on one Mac and one Linux machine.
+- [x] **Stage 9. Releases and updates.** GoReleaser, release workflow, `agent update` with rollback, update checks in the server and the UI button, migrations. Done when `v0.1.0` and `v0.1.1` are published; `agent update` moves from the first to the second on both OSes with an agent running, without interrupting it; a deliberately broken release rolls itself back.
 
 ### 12.4. Out of scope for the first version
 
@@ -671,6 +688,8 @@ CHANGELOG.md, README.md
 | On macOS a LaunchAgent starts only after the user logs in | the server is unreachable after a reboot until login | accepted limitation, documented in the README |
 | Unsigned binary on macOS | the system may refuse to run it | check in stage 9 on a clean Mac; add signing to the release workflow if needed |
 | UI access equals terminal access, and the Claude adapter runs without permission prompts | any device in the tailnet controls the machine | `allowed_users` filled by setup, Tailscale ACLs, Funnel never enabled |
+| Another local user on the same machine | can reach `127.0.0.1:<port>` | out of scope: personal machines are assumed; `allowed_users` still applies |
+| tmux misses SIGCHLD for an exited pane | a clean exit shows as failed | `ListPanes` nudges tmux with `run-shell true` (section 3.5) |
 
 ### 13.2. Decisions
 

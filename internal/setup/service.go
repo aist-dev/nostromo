@@ -147,10 +147,12 @@ type Systemd struct {
 	Run  tmux.Runner
 }
 
-func (m *Systemd) Name() string               { return "systemd user service " + SystemdUnit }
-func (m *Systemd) Path() string               { return filepath.Join(m.Home, ".config", "systemd", "user", SystemdUnit) }
+func (m *Systemd) Name() string { return "systemd user service " + SystemdUnit }
+func (m *Systemd) Path() string {
+	return filepath.Join(m.Home, ".config", "systemd", "user", SystemdUnit)
+}
 func (m *Systemd) Render(s ServiceSpec) string { return SystemdUnitFile(s) }
-func (m *Systemd) RestartCommand() string     { return "systemctl --user restart nostromo" }
+func (m *Systemd) RestartCommand() string      { return "systemctl --user restart nostromo" }
 
 func (m *Systemd) Install(ctx context.Context, s ServiceSpec, start bool) (bool, error) {
 	changed, err := writeIfChanged(m.Path(), m.Render(s))
@@ -204,9 +206,9 @@ func (m *Launchd) Path() string {
 	return filepath.Join(m.Home, "Library", "LaunchAgents", LaunchdLabel+".plist")
 }
 func (m *Launchd) Render(s ServiceSpec) string { return LaunchdPlist(s) }
-func (m *Launchd) domain() string             { return "gui/" + strconv.Itoa(m.UID) }
-func (m *Launchd) target() string             { return m.domain() + "/" + LaunchdLabel }
-func (m *Launchd) RestartCommand() string     { return "launchctl kickstart -k " + m.target() }
+func (m *Launchd) domain() string              { return "gui/" + strconv.Itoa(m.UID) }
+func (m *Launchd) target() string              { return m.domain() + "/" + LaunchdLabel }
+func (m *Launchd) RestartCommand() string      { return "launchctl kickstart -k " + m.target() }
 
 func (m *Launchd) Install(ctx context.Context, s ServiceSpec, start bool) (bool, error) {
 	changed, err := writeIfChanged(m.Path(), m.Render(s))
