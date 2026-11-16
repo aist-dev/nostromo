@@ -2,6 +2,12 @@
 
 Every version notes whether it migrates stored data (chat records or config).
 
+## 0.1.1 — 2026-11-16
+
+- The UI shows the server version under the machine name.
+
+Data migration: none.
+
 ## 0.1.0 — 2026-11-16
 
 First version.

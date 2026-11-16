@@ -14,6 +14,7 @@ test("chat lifecycle in the browser", async ({ page, isMobile }) => {
 
   await page.goto("/");
   await expect(page.locator("#host")).not.toHaveText("…");
+  await expect(page.locator("#version")).not.toBeEmpty();
 
   // Create a chat through the dialog.
   if (isMobile) await page.locator("#menu-btn").click();

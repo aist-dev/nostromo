@@ -100,6 +100,7 @@
   function renderDrawer() {
     const snap = state.snap;
     $("host").textContent = snap.host;
+    $("version").textContent = /^\d+\.\d+\.\d+/.test(snap.version) ? "v" + snap.version : snap.version;
     document.title = snap.host + " · nostromo";
 
     const peers = $("peers");
