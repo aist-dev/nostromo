@@ -391,8 +391,10 @@ func (in *Installer) tailscaleServe(ctx context.Context, cfg config.Config, r *r
 		return
 	}
 	if !st.MagicDNSEnabled || len(st.CertDomains) == 0 {
-		r.warn("MagicDNS or HTTPS certificates are off in this tailnet")
-		r.need("enable MagicDNS and HTTPS certificates once for the tailnet: https://login.tailscale.com/admin/dns")
+		// tailscale serve would block waiting for HTTPS to be enabled in the admin console.
+		r.warn("MagicDNS or HTTPS certificates are off in this tailnet; skipping tailscale serve")
+		r.need("enable MagicDNS and HTTPS certificates once for the tailnet: https://login.tailscale.com/admin/dns\n then run: agent setup")
+		return
 	}
 	target := in.target(cfg)
 	sc, err := in.Tailscale.ServeStatus(ctx)

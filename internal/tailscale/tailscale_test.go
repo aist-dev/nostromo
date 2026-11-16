@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 type fakeRunner struct {
@@ -134,5 +135,22 @@ func TestFind(t *testing.T) {
 	c, err := Find()
 	if err == nil && c.Bin != MacAppBinary {
 		t.Fatalf("unexpected: %+v", c)
+	}
+}
+
+type slowRunner struct{}
+
+func (slowRunner) Run(ctx context.Context, name string, args ...string) ([]byte, []byte, error) {
+	<-ctx.Done()
+	return nil, nil, ctx.Err()
+}
+
+func TestTimeout(t *testing.T) {
+	old := Timeout
+	Timeout = 50 * time.Millisecond
+	defer func() { Timeout = old }()
+	c := &Client{Bin: "ts", Run: slowRunner{}}
+	if err := c.Serve(context.Background(), 443, "http://127.0.0.1:1"); err == nil || !strings.Contains(err.Error(), "no answer within") {
+		t.Fatal(err)
 	}
 }

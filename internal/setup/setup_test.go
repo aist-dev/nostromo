@@ -212,7 +212,6 @@ func TestSetupManualSteps(t *testing.T) {
 	out := f.out.String()
 	for _, want := range []string{
 		"sudo loginctl enable-linger me",
-		"sudo tailscale set --operator=me",
 		"admin/dns",
 		"\"hooks\"",
 		"check the server log",
@@ -222,6 +221,9 @@ func TestSetupManualSteps(t *testing.T) {
 			t.Errorf("output lacks %q:\n%s", want, out)
 		}
 	}
+	if len(f.ts.served) != 0 {
+		t.Fatal("tailscale serve must not be called while HTTPS certificates are off")
+	}
 	if _, err := os.Stat(filepath.Join(f.home, ".bashrc")); err == nil {
 		t.Fatal("PATH already contains ~/.local/bin: no rc edit expected")
 	}
@@ -229,6 +231,13 @@ func TestSetupManualSteps(t *testing.T) {
 
 func TestSetupTailscaleVariants(t *testing.T) {
 	ctx := context.Background()
+	// Serving denied: the operator hint is printed.
+	f0 := newFixture(t)
+	f0.ts.setErr = errors.New("Access denied: serve config denied")
+	f0.in.Setup(ctx, Options{})
+	if !strings.Contains(f0.out.String(), "sudo tailscale set --operator=me") {
+		t.Fatal(f0.out.String())
+	}
 	// No tailscale at all.
 	f := newFixture(t)
 	f.in.Tailscale = nil

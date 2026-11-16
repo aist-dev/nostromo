@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/aist-dev/nostromo/internal/tmux"
 )
@@ -47,8 +48,17 @@ func Find() (*Client, error) {
 	return nil, errors.New("tailscale CLI not found")
 }
 
+// Timeout bounds every tailscale call; some subcommands wait for user action
+// (for example enabling HTTPS in the admin console) instead of failing.
+var Timeout = 20 * time.Second
+
 func (c *Client) run(ctx context.Context, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, Timeout)
+	defer cancel()
 	out, errb, err := c.Run.Run(ctx, c.Bin, args...)
+	if ctx.Err() == context.DeadlineExceeded {
+		return out, fmt.Errorf("tailscale %s: no answer within %v", strings.Join(args, " "), Timeout)
+	}
 	if err != nil {
 		msg := strings.TrimSpace(string(errb))
 		if msg == "" {
