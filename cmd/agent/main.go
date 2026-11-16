@@ -8,6 +8,7 @@ import (
 	"github.com/aist-dev/nostromo/internal/hook"
 	"github.com/aist-dev/nostromo/internal/server"
 	"github.com/aist-dev/nostromo/internal/server/web"
+	"github.com/aist-dev/nostromo/internal/setup"
 )
 
 func main() {
@@ -16,5 +17,8 @@ func main() {
 		return server.Extras{Static: web.Handler()}
 	})
 	env.Commands["hook"] = hook.Command
+	for name, cmd := range setup.Commands(nil) {
+		env.Commands[name] = cmd
+	}
 	os.Exit(cli.Main(os.Args[1:], env))
 }

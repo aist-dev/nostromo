@@ -1,0 +1,20 @@
+# Written by "agent setup". Changes are overwritten on upgrade.
+[Unit]
+Description=nostromo agent server
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart="/home/me/.nostromo/bin/agent" serve
+Restart=on-failure
+RestartSec=2
+KillMode=process
+Environment="HOME=/home/me"
+Environment="LANG=en_US.UTF-8"
+Environment="NOSTROMO_HOME=/home/me/.nostromo"
+Environment="ODD=a \"quoted\" 100%% <value> & 'more'"
+Environment="PATH=/home/me/.local/bin:/usr/bin:/bin"
+Environment="SHELL=/bin/zsh"
+
+[Install]
+WantedBy=default.target

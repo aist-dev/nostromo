@@ -52,3 +52,15 @@ jobs:
       - name: Browser test
         working-directory: e2e
         run: npx playwright test
+
+  install:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - name: Shellcheck
+        run: shellcheck install.sh scripts/*.sh
+      - name: Installer in a clean container
+        run: scripts/test-install.sh --container

@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Written by "agent setup". Changes are overwritten on upgrade. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.nostromo.server</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/home/me/.nostromo/bin/agent</string>
+    <string>serve</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>AbandonProcessGroup</key>
+  <true/>
+  <key>ProcessType</key>
+  <string>Interactive</string>
+  <key>StandardOutPath</key>
+  <string>/home/me/.nostromo/logs/launchd.log</string>
+  <key>StandardErrorPath</key>
+  <string>/home/me/.nostromo/logs/launchd.log</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key>
+    <string>/home/me</string>
+    <key>LANG</key>
+    <string>en_US.UTF-8</string>
+    <key>NOSTROMO_HOME</key>
+    <string>/home/me/.nostromo</string>
+    <key>ODD</key>
+    <string>a &quot;quoted&quot; 100% &lt;value&gt; &amp; &apos;more&apos;</string>
+    <key>PATH</key>
+    <string>/home/me/.local/bin:/usr/bin:/bin</string>
+    <key>SHELL</key>
+    <string>/bin/zsh</string>
+  </dict>
+</dict>
+</plist>
