@@ -1,6 +1,7 @@
 package setup
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -45,6 +46,11 @@ type Installer struct {
 	Migrate func() ([]string, error)
 	// WaitTimeout bounds the wait for the service after (re)start.
 	WaitTimeout time.Duration
+	// TTY reads answers from the user's terminal; nil when setup runs without one
+	// (then nothing is asked and manual steps are listed instead).
+	TTY *bufio.Reader
+	// Sudo runs a command with sudo on the user's terminal.
+	Sudo func(ctx context.Context, args ...string) error
 }
 
 // Options select setup steps.
@@ -369,6 +375,9 @@ func (in *Installer) service(ctx context.Context, o Options, newBinary bool, r *
 	if !o.Upgrade && in.GOOS == "linux" {
 		enabled, err := in.Service.EnableLinger(ctx)
 		switch {
+		case err != nil && in.ask("Starting the service at boot without a login needs \"sudo loginctl enable-linger "+in.User+"\". Run it now?") && in.Sudo(ctx, "loginctl", "enable-linger", in.User) == nil:
+			os.WriteFile(in.lingerMarker(), nil, 0o600)
+			r.ok("service starts at boot without a login (linger enabled)")
 		case err != nil:
 			r.warn("cannot enable start at boot without login: %v", err)
 			r.need("let the service start at boot without a login: sudo loginctl enable-linger " + in.User)
@@ -410,72 +419,101 @@ func (in *Installer) waitHealthy(ctx context.Context, cfg config.Config, r *repo
 	}
 }
 
+const selfHeal = "the server finishes the HTTPS setup by itself within a minute after that"
+
 // operatorHint is the one-time command that lets a Linux user manage tailscale serve.
 func (in *Installer) operatorHint() string {
 	if in.GOOS == "linux" {
-		return "allow your user to configure Tailscale: sudo tailscale set --operator=" + in.User + "\n then run: " + in.setupCmd()
+		return "allow your user to configure Tailscale: sudo tailscale set --operator=" + in.User + "\n " + selfHeal
 	}
-	return "run: tailscale serve --bg --https=443 http://127.0.0.1:<port>"
+	return "check that the Tailscale app is running and logged in; " + selfHeal
+}
+
+// ask prints a yes/no question on the terminal; Enter means yes.
+func (in *Installer) ask(question string) bool {
+	if in.TTY == nil {
+		return false
+	}
+	fmt.Fprintf(in.Out, "  ? %s [Y/n] ", question)
+	line, _ := in.TTY.ReadString('\n')
+	switch strings.ToLower(strings.TrimSpace(line)) {
+	case "", "y", "yes":
+		return true
+	}
+	return false
+}
+
+// waitForHTTPS lets the user enable HTTPS certificates in the admin console
+// while setup waits, instead of rerunning setup afterwards.
+func (in *Installer) waitForHTTPS(ctx context.Context) bool {
+	if in.TTY == nil {
+		return false
+	}
+	fmt.Fprintln(in.Out, "  HTTPS certificates are off for your tailnet. In the Tailscale admin console,")
+	fmt.Fprintln(in.Out, "  https://login.tailscale.com/admin/dns, turn on MagicDNS and HTTPS Certificates.")
+	for i := 0; i < 20; i++ {
+		fmt.Fprint(in.Out, "  ? Press Enter when done, or type s and Enter to skip: ")
+		line, err := in.TTY.ReadString('\n')
+		if err != nil || strings.EqualFold(strings.TrimSpace(line), "s") {
+			return false
+		}
+		if st, err := in.Tailscale.Status(ctx); err == nil && st.HTTPSReady() {
+			return true
+		}
+		fmt.Fprintln(in.Out, "  Still off (it can take a few seconds to apply).")
+	}
+	return false
 }
 
 func (in *Installer) tailscaleServe(ctx context.Context, cfg config.Config, r *report) {
 	if in.Tailscale == nil {
 		r.warn("tailscale CLI not found: the UI is only reachable on this machine")
-		r.need("install Tailscale and log in (https://tailscale.com/download), then run: " + in.setupCmd())
+		r.need("install Tailscale and log in (https://tailscale.com/download); " + selfHeal)
 		return
 	}
 	st, err := in.Tailscale.Status(ctx)
 	if err != nil || !st.Running() {
 		r.warn("Tailscale is not running")
-		r.need("start Tailscale and log in (tailscale up), then run: " + in.setupCmd())
+		r.need("start Tailscale and log in (tailscale up); " + selfHeal)
 		return
 	}
-	if !st.MagicDNSEnabled || len(st.CertDomains) == 0 {
-		// tailscale serve would block waiting for HTTPS to be enabled in the admin console.
-		r.warn("MagicDNS or HTTPS certificates are off in this tailnet; skipping tailscale serve")
-		r.need("enable MagicDNS and HTTPS certificates once for the tailnet: https://login.tailscale.com/admin/dns\n then run: " + in.setupCmd())
-		return
+	if !st.HTTPSReady() {
+		if !in.waitForHTTPS(ctx) {
+			// tailscale serve would block waiting for HTTPS to be enabled.
+			r.warn("MagicDNS or HTTPS certificates are off in this tailnet")
+			r.need("enable MagicDNS and HTTPS certificates once for the tailnet: https://login.tailscale.com/admin/dns\n " + selfHeal)
+			return
+		}
+		st, _ = in.Tailscale.Status(ctx)
+		r.ok("HTTPS certificates are on")
 	}
 	target := in.target(cfg)
-	sc, err := in.Tailscale.ServeStatus(ctx)
-	if err != nil {
-		r.warn("cannot read tailscale serve status: %v", err)
+	port, changed, err := tailscale.Ensure(ctx, in.Tailscale, target)
+	if err != nil && !errors.Is(err, tailscale.ErrPortsTaken) && in.GOOS == "linux" &&
+		in.ask("Tailscale does not let your user set up HTTPS yet. Run \"sudo tailscale set --operator="+in.User+"\" now?") {
+		if serr := in.Sudo(ctx, "tailscale", "set", "--operator="+in.User); serr != nil {
+			r.warn("sudo tailscale set: %v", serr)
+		} else {
+			port, changed, err = tailscale.Ensure(ctx, in.Tailscale, target)
+		}
+	}
+	switch {
+	case errors.Is(err, tailscale.ErrPortsTaken):
+		r.warn("%v", err)
+		r.need("free https port 443 or 8443 in tailscale serve; " + selfHeal)
+		return
+	case err != nil:
+		r.warn("tailscale serve: %v", err)
 		r.need(in.operatorHint())
 		return
+	case changed:
+		r.ok("tailscale serve: https port %d -> %s", port, target)
+	default:
+		r.ok("tailscale serve already proxies https port %d to %s", port, target)
 	}
-	port := 0
-	for _, p := range []int{443, 8443} {
-		if sc.HTTPS[p] == target {
-			port = p
-			r.ok("tailscale serve already proxies https port %d to %s", p, target)
-			break
-		}
-	}
-	if port == 0 {
-		for _, p := range []int{443, 8443} {
-			if _, taken := sc.HTTPS[p]; taken {
-				continue
-			}
-			if err := in.Tailscale.Serve(ctx, p, target); err != nil {
-				r.warn("tailscale serve: %v", err)
-				r.need(strings.Replace(in.operatorHint(), "<port>", strconv.Itoa(cfg.Port), 1))
-				return
-			}
-			port = p
-			r.ok("tailscale serve: https port %d -> %s", p, target)
-			break
-		}
-	}
-	if port == 0 {
-		r.warn("https ports 443 and 8443 are both used by other tailscale serve configs")
-		r.need("free one of them, then run: " + in.setupCmd())
-		return
-	}
-	for _, f := range sc.Funnel {
-		if f == port {
-			r.warn("Tailscale Funnel is ON for port %d: the UI is on the public internet", port)
-			r.need(fmt.Sprintf("turn Funnel off: tailscale funnel --https=%d off", port))
-		}
+	if sc, err := in.Tailscale.ServeStatus(ctx); err == nil && sc.FunnelOn(port) {
+		r.warn("Tailscale Funnel is ON for port %d: the UI is on the public internet", port)
+		r.need(fmt.Sprintf("turn Funnel off: tailscale funnel --https=%d off", port))
 	}
 	if len(cfg.AllowedUsers) == 0 && st.Login != "" {
 		if err := config.SetAllowedUsers(in.Paths.Config(), []string{st.Login}); err != nil {

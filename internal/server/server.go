@@ -62,6 +62,7 @@ type Server struct {
 	tsSuffix    string
 	tsChecked   time.Time
 	ttys        map[*ttySession]struct{}
+	users       []string
 	ttyWG       sync.WaitGroup
 	shutdownCtx context.Context
 	shutdown    context.CancelFunc
@@ -75,7 +76,7 @@ func New(o Options) *Server {
 	if o.Now == nil {
 		o.Now = time.Now
 	}
-	s := &Server{opt: o, mux: http.NewServeMux(), ttys: map[*ttySession]struct{}{}}
+	s := &Server{opt: o, mux: http.NewServeMux(), ttys: map[*ttySession]struct{}{}, users: o.Config.AllowedUsers}
 	s.shutdownCtx, s.shutdown = context.WithCancel(context.Background())
 	s.routes()
 	return s
@@ -209,7 +210,9 @@ func (s *Server) identityAllowed(r *http.Request) bool {
 	if r.Method == http.MethodGet && r.URL.Path == "/healthz" {
 		return true
 	}
-	users := s.opt.Config.AllowedUsers
+	s.mu.Lock()
+	users := s.users
+	s.mu.Unlock()
 	if len(users) == 0 {
 		return isLoopbackHost(hostOnly(r.Host))
 	}
@@ -536,6 +539,13 @@ func (s *Server) update(w http.ResponseWriter, r *http.Request) {
 	}
 	s.opt.Logger.Printf("update started from the UI")
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "started"})
+}
+
+// SetAllowedUsers replaces allowed_users in the running server.
+func (s *Server) SetAllowedUsers(users []string) {
+	s.mu.Lock()
+	s.users = append([]string(nil), users...)
+	s.mu.Unlock()
 }
 
 // Shutdown closes every terminal connection and waits for them to finish.

@@ -50,24 +50,29 @@ Both ways call the new binary by its full path, so an existing `agent` alias doe
 3. Checks tmux and the agent commands in a login shell.
 4. Adds two hooks to `~/.claude/settings.json` (`SessionStart`, `UserPromptSubmit`) that keep each chat's resume id current and title it from the first prompt. Other settings and hooks are preserved; a backup is saved as `settings.json.nostromo.bak`. The hooks do nothing for a plain `claude` started without `agent`.
 5. Installs and starts the background service: a systemd user unit `nostromo.service` on Linux (plus `loginctl enable-linger` so it starts at boot without a login), a launchd agent `com.nostromo.server` on macOS.
-6. Configures `tailscale serve --bg --https=443 http://127.0.0.1:8787` (port 8443 if 443 is used by something else) and limits the UI to your Tailscale login (`allowed_users`).
+6. Configures `tailscale serve --bg --https=443 http://127.0.0.1:8787` (port 8443 if 443 is used by something else) and limits the UI to your Tailscale login (`allowed_users`). If Tailscale is not ready yet, the server finishes this step by itself later (`tailscale_serve = true` in the config; set it to `false` to manage `tailscale serve` yourself).
 7. Prints the address and runs `agent doctor`.
 
-Anything it cannot do by itself is listed at the end under **Left to do by hand**, with the exact command. To rerun setup after such a step, use the full path, `~/.nostromo/bin/agent setup`: in a terminal opened before the install, `agent` may still be the old alias or not on `PATH` yet.
+Anything it cannot do by itself is listed at the end under **Left to do by hand**, with the exact command (see below).
 
 ### Steps that need you
 
-These need administrator rights or a browser, so `agent setup` never runs them itself. It prints the ones that apply. **If an assistant or script runs the installation for you, it must stop and ask you to run these commands; it must not run `sudo` on its own.**
+A few things need administrator rights or a browser. When you run the installer in a terminal, it asks and does them on the spot, so the installation finishes in one go:
+
+- **Tailscale does not let your user set up HTTPS** (Linux): it offers to run `sudo tailscale set --operator=$USER` and asks for your password.
+- **HTTPS certificates are off for the tailnet**: it shows the admin console link (https://login.tailscale.com/admin/dns), waits until you turn on MagicDNS and HTTPS Certificates, and continues.
+- **Start at boot without a login is refused** (Linux): it offers to run `sudo loginctl enable-linger $USER`.
+
+Without a terminal (for example when a script or an assistant runs the installer, or with `NOSTROMO_NONINTERACTIVE=1`), nothing is asked and nothing runs with `sudo`; the steps are listed at the end instead. You never need to run setup again after doing them: the server checks every minute and sets up the HTTPS address by itself as soon as Tailscale allows it. **An assistant running the installation for you must show you these commands and let you run them; it must not run `sudo` on its own.**
 
 | When | What to run | Why |
 | --- | --- | --- |
-| tmux missing or older than 3.2 | `sudo apt install tmux` (Debian/Ubuntu), `brew install tmux` (macOS) | chats run in tmux |
-| Linux, `tailscale serve` says access denied | `sudo tailscale set --operator=$USER`, then `~/.nostromo/bin/agent setup` again | lets your user configure `tailscale serve` without sudo |
-| Linux, setup could not enable linger | `sudo loginctl enable-linger $USER` | the service starts at boot without logging in |
-| MagicDNS or HTTPS certificates are off | enable both at https://login.tailscale.com/admin/dns, then `~/.nostromo/bin/agent setup` again | the HTTPS address needs them |
-| Tailscale not installed or not logged in | install it from https://tailscale.com/download, run `tailscale up`, then `~/.nostromo/bin/agent setup` again | access from other devices |
+| tmux missing or older than 3.2 | `sudo apt install tmux` (Debian/Ubuntu), `brew install tmux` (macOS), then run the installer again | chats run in tmux |
+| Linux, Tailscale does not let your user set up HTTPS | `sudo tailscale set --operator=$USER` | lets your user configure `tailscale serve` |
+| HTTPS certificates are off | turn on MagicDNS and HTTPS Certificates at https://login.tailscale.com/admin/dns | the HTTPS address needs them |
+| Linux, start at boot refused | `sudo loginctl enable-linger $USER` | the service starts at boot without logging in |
+| Tailscale not installed or not logged in | install it from https://tailscale.com/download and run `tailscale up` | access from other devices |
 | `claude` not found | install and log in to Claude Code | the default agent |
-| `~/.claude/settings.json` is not valid JSON | fix the file, then `~/.nostromo/bin/agent setup` again (or paste the printed snippet) | setup never edits a file it cannot parse |
 
 After the first install, open a new terminal so the `PATH` change and the disabled alias take effect.
 
@@ -110,6 +115,7 @@ tmux_socket = "nostromo"
 default_agent = "claude"
 repo = "aist-dev/nostromo"
 check_updates = true        # look for a new release once a day
+tailscale_serve = true      # set up the HTTPS address with tailscale serve as soon as Tailscale allows it
 auto_update = false         # install new releases automatically
 allowed_users = []          # Tailscale logins allowed to use the UI; set by setup ("*" = anyone in the tailnet, empty = this machine only)
 peers = []                  # other machines shown in the UI switcher, e.g. ["mac-mini"]
@@ -181,7 +187,7 @@ npm --prefix e2e ci && npx --prefix e2e playwright install chromium && npm --pre
 scripts/test-install.sh                          # installer against a fake release server
 ```
 
-Tests never touch the real `~/.nostromo` or your tmux sessions. Releases are built by GoReleaser from `v*` tags; see [docs/release-checklist.md](docs/release-checklist.md).
+Tests never touch the real `~/.nostromo`, your tmux sessions or your Tailscale configuration (`NOSTROMO_TAILSCALE=none`, `tailscale_serve = false`). Releases are built by GoReleaser from `v*` tags; see [docs/release-checklist.md](docs/release-checklist.md).
 
 ## License
 

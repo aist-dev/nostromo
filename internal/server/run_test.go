@@ -28,6 +28,9 @@ func testEnv(t *testing.T) (cli.Env, string, *bytes.Buffer) {
 	env.Stdout, env.Stderr = &bytes.Buffer{}, errb
 	env.Getenv = func(k string) string { return vars[k] }
 	env.NewTmux = func(config.Config, config.Paths) tmux.API { return faketmux.New() }
+	// Never let a test server touch the real tailscale serve config of this machine.
+	os.MkdirAll(filepath.Join(home, ".nostromo"), 0o755)
+	os.WriteFile(filepath.Join(home, ".nostromo", "config.toml"), []byte(safeConfig), 0o644)
 	return env, home, errb
 }
 
@@ -45,7 +48,7 @@ func TestRunServesAndShutsDown(t *testing.T) {
 	env, home, errb := testEnv(t)
 	port := freePort(t)
 	os.MkdirAll(filepath.Join(home, ".nostromo"), 0o755)
-	os.WriteFile(filepath.Join(home, ".nostromo", "config.toml"), []byte("port = "+itoa(port)+"\n"), 0o644)
+	os.WriteFile(filepath.Join(home, ".nostromo", "config.toml"), []byte(safeConfig+"port = "+itoa(port)+"\n"), 0o644)
 	app, err := cli.NewApp(env)
 	if err != nil {
 		t.Fatal(err)
@@ -128,7 +131,7 @@ func TestCommand(t *testing.T) {
 	if code := cmd(context.Background(), nil, env); code != 1 {
 		t.Fatalf("bad config: %d", code)
 	}
-	os.Remove(filepath.Join(home, ".nostromo", "config.toml"))
+	os.WriteFile(filepath.Join(home, ".nostromo", "config.toml"), []byte(safeConfig), 0o644)
 	l, _ := net.Listen("tcp", "127.0.0.1:0")
 	defer l.Close()
 	if code := cmd(context.Background(), []string{"--listen", l.Addr().String()}, env); code != 1 || !strings.Contains(errb.String(), "address already in use") {
@@ -140,5 +143,7 @@ func TestCommand(t *testing.T) {
 		t.Fatalf("clean shutdown: %d %s", code, errb)
 	}
 }
+
+const safeConfig = "tailscale_serve = false\n"
 
 func itoa(i int) string { return strconv.Itoa(i) }

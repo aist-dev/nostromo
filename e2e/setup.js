@@ -35,6 +35,7 @@ module.exports = async function globalSetup() {
     `port = ${port}`,
     `tmux_socket = "${socket}"`,
     `check_updates = false`,
+    `tailscale_serve = false`,
     `default_agent = "fake"`,
     `[agents.fake]`,
     `start = "'${fake}' --session-id {id}"`,

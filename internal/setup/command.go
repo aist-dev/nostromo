@@ -1,10 +1,12 @@
 package setup
 
 import (
+	"bufio"
 	"context"
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/user"
 	"path/filepath"
 	"runtime"
@@ -49,6 +51,22 @@ func NewInstaller(env cli.Env) (*Installer, error) {
 	if in.Shell == "" {
 		in.Shell = "/bin/sh"
 	}
+	// Ask on the terminal when there is one (also under "curl | bash", where stdin
+	// is the script); never when NOSTROMO_NONINTERACTIVE is set.
+	var tty *os.File
+	if env.Getenv("NOSTROMO_NONINTERACTIVE") == "" {
+		if f, err := os.OpenFile("/dev/tty", os.O_RDWR, 0); err == nil {
+			tty = f
+			in.TTY = bufio.NewReader(f)
+		}
+	}
+	in.Sudo = func(ctx context.Context, args ...string) error {
+		cmd := exec.CommandContext(ctx, "sudo", args...)
+		if tty != nil {
+			cmd.Stdin, cmd.Stdout, cmd.Stderr = tty, tty, tty
+		}
+		return cmd.Run()
+	}
 	switch {
 	case env.Getenv("NOSTROMO_SERVICE") == "none":
 		// No background service (containers, tests): agent serve is run by hand.
@@ -57,8 +75,12 @@ func NewInstaller(env cli.Env) (*Installer, error) {
 	case runtime.GOOS == "darwin":
 		in.Service = &Launchd{Home: in.Home, UID: os.Getuid(), Run: tmux.ExecRunner{}}
 	}
-	if ts, err := tailscale.Find(); err == nil {
-		in.Tailscale = ts
+	// NOSTROMO_TAILSCALE=none keeps setup, doctor and uninstall away from the
+	// machine's Tailscale configuration (tests, containers).
+	if env.Getenv("NOSTROMO_TAILSCALE") != "none" {
+		if ts, err := tailscale.Find(); err == nil {
+			in.Tailscale = ts
+		}
 	}
 	return in, nil
 }

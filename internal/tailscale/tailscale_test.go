@@ -154,3 +154,59 @@ func TestTimeout(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+type fakeAPI struct {
+	sc       ServeConfig
+	statErr  error
+	serveErr error
+	served   []int
+}
+
+func (f *fakeAPI) Status(context.Context) (Status, error) { return Status{}, nil }
+func (f *fakeAPI) ServeStatus(context.Context) (ServeConfig, error) {
+	return f.sc, f.statErr
+}
+func (f *fakeAPI) Serve(_ context.Context, p int, target string) error {
+	if f.serveErr != nil {
+		return f.serveErr
+	}
+	f.served = append(f.served, p)
+	f.sc.HTTPS[p] = target
+	return nil
+}
+func (f *fakeAPI) ServeOff(context.Context, int) error { return nil }
+
+func TestEnsure(t *testing.T) {
+	ctx := context.Background()
+	const target = "http://127.0.0.1:8787"
+	f := &fakeAPI{sc: ServeConfig{HTTPS: map[int]string{}}}
+	if p, changed, err := Ensure(ctx, f, target); p != 443 || !changed || err != nil {
+		t.Fatal(p, changed, err)
+	}
+	if p, changed, err := Ensure(ctx, f, target); p != 443 || changed || err != nil {
+		t.Fatal("already configured", p, changed, err)
+	}
+	f = &fakeAPI{sc: ServeConfig{HTTPS: map[int]string{443: "http://127.0.0.1:3000"}}}
+	if p, _, _ := Ensure(ctx, f, target); p != 8443 {
+		t.Fatal("443 taken", p)
+	}
+	f = &fakeAPI{sc: ServeConfig{HTTPS: map[int]string{443: "x", 8443: "y"}}}
+	if _, _, err := Ensure(ctx, f, target); !errors.Is(err, ErrPortsTaken) {
+		t.Fatal(err)
+	}
+	f = &fakeAPI{sc: ServeConfig{HTTPS: map[int]string{}}, serveErr: errors.New("access denied")}
+	if _, _, err := Ensure(ctx, f, target); err == nil {
+		t.Fatal("serve error")
+	}
+	f = &fakeAPI{statErr: errors.New("x")}
+	if _, _, err := Ensure(ctx, f, target); err == nil {
+		t.Fatal("status error")
+	}
+	if !(ServeConfig{Funnel: []int{443}}).FunnelOn(443) || (ServeConfig{}).FunnelOn(443) {
+		t.Fatal("FunnelOn")
+	}
+	ready := Status{BackendState: "Running", MagicDNSEnabled: true, CertDomains: []string{"x"}}
+	if !ready.HTTPSReady() || (Status{BackendState: "Running", MagicDNSEnabled: true}).HTTPSReady() {
+		t.Fatal("HTTPSReady")
+	}
+}

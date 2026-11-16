@@ -52,6 +52,7 @@ port = 9000
 tmux_socket = "other"
 check_updates = false
 auto_update = true
+tailscale_serve = false
 allowed_users = ["me@example.com"]
 peers = ["box"]
 default_agent = "codex"
@@ -66,7 +67,7 @@ shell_wrap = false
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Port != 9000 || cfg.TmuxSocket != "other" || cfg.CheckUpdates || !cfg.AutoUpdate || cfg.Repo != "x/y" {
+	if cfg.Port != 9000 || cfg.TmuxSocket != "other" || cfg.CheckUpdates || !cfg.AutoUpdate || cfg.Repo != "x/y" || cfg.TailscaleServe {
 		t.Fatalf("overrides not applied: %+v", cfg)
 	}
 	if len(cfg.AllowedUsers) != 1 || cfg.AllowedUsers[0] != "me@example.com" || len(cfg.Peers) != 1 {

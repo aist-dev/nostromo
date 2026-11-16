@@ -475,7 +475,9 @@ Running `install.sh` again on an installed system is safe: it installs the lates
 
 ### 9.3. Step B: `agent setup`
 
-Every step is idempotent and prints its result. A failing optional step (Tailscale, hooks) does not stop the installation: at the end it prints what is left to do manually, with the exact command. `setup` never runs `sudo`.
+Every step is idempotent and prints its result. A failing optional step (Tailscale, hooks) does not stop the installation.
+
+Steps that need administrator rights or the browser are finished during the installation when there is a terminal (`/dev/tty`, which also works under `curl | bash`): setup asks before running `sudo tailscale set --operator=$USER` or `sudo loginctl enable-linger $USER`, and waits while the user enables HTTPS certificates in the admin console. Without a terminal, or with `NOSTROMO_NONINTERACTIVE=1`, it asks nothing, never runs `sudo`, and lists the steps at the end. The user never has to rerun setup afterwards: while `tailscale_serve = true` (the default), the server checks every minute and, once Tailscale allows it, configures `tailscale serve` and then fills `allowed_users` (in that order, because an empty list only admits local requests). Tests and the e2e harness set `tailscale_serve = false` so they never touch the machine's real Tailscale configuration.
 
 Flags: `--no-service` and `--no-tailscale` skip those steps (containers, CI); `--upgrade` is the mode used by `agent update` (section 10). `NOSTROMO_SERVICE=none` disables the service for every command, including `agent update`.
 

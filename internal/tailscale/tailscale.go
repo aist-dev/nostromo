@@ -194,3 +194,49 @@ type API interface {
 	Serve(ctx context.Context, httpsPort int, target string) error
 	ServeOff(ctx context.Context, httpsPort int) error
 }
+
+// HTTPSReady reports whether the tailnet can issue HTTPS certificates for this
+// node. Without them `tailscale serve` blocks until they are enabled.
+func (s Status) HTTPSReady() bool {
+	return s.Running() && s.MagicDNSEnabled && len(s.CertDomains) > 0
+}
+
+// ServePorts are the https ports nostromo may use, in order of preference.
+var ServePorts = []int{443, 8443}
+
+// ErrPortsTaken means every https port in ServePorts serves something else.
+var ErrPortsTaken = errors.New("https ports 443 and 8443 are both used by other tailscale serve configs")
+
+// Ensure makes tailscale serve proxy one of ServePorts to target. It returns the
+// port and whether it had to configure it.
+func Ensure(ctx context.Context, api API, target string) (int, bool, error) {
+	sc, err := api.ServeStatus(ctx)
+	if err != nil {
+		return 0, false, err
+	}
+	for _, p := range ServePorts {
+		if sc.HTTPS[p] == target {
+			return p, false, nil
+		}
+	}
+	for _, p := range ServePorts {
+		if _, taken := sc.HTTPS[p]; taken {
+			continue
+		}
+		if err := api.Serve(ctx, p, target); err != nil {
+			return 0, false, err
+		}
+		return p, true, nil
+	}
+	return 0, false, ErrPortsTaken
+}
+
+// FunnelOn reports whether Funnel exposes port to the internet.
+func (sc ServeConfig) FunnelOn(port int) bool {
+	for _, f := range sc.Funnel {
+		if f == port {
+			return true
+		}
+	}
+	return false
+}

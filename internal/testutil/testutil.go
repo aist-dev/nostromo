@@ -161,6 +161,7 @@ func FakeConfig(fakeAgent, socket string) string {
 	return "tmux_socket = \"" + socket + "\"\n" +
 		"default_agent = \"fake\"\n" +
 		"check_updates = false\n" +
+		"tailscale_serve = false\n" +
 		"[agents.fake]\n" +
 		"start = \"" + q + " --session-id {id}\"\n" +
 		"resume = \"" + q + " --resume {resume_id}\"\n" +

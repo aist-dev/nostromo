@@ -28,15 +28,16 @@ func (a Agent) WrapInShell() bool {
 
 // Config is the user configuration.
 type Config struct {
-	Port         int              `toml:"port"`
-	TmuxSocket   string           `toml:"tmux_socket"`
-	DefaultAgent string           `toml:"default_agent"`
-	Repo         string           `toml:"repo"`
-	CheckUpdates bool             `toml:"check_updates"`
-	AutoUpdate   bool             `toml:"auto_update"`
-	AllowedUsers []string         `toml:"allowed_users"`
-	Peers        []string         `toml:"peers"`
-	Agents       map[string]Agent `toml:"agents"`
+	Port           int              `toml:"port"`
+	TmuxSocket     string           `toml:"tmux_socket"`
+	DefaultAgent   string           `toml:"default_agent"`
+	Repo           string           `toml:"repo"`
+	CheckUpdates   bool             `toml:"check_updates"`
+	AutoUpdate     bool             `toml:"auto_update"`
+	AllowedUsers   []string         `toml:"allowed_users"`
+	TailscaleServe bool             `toml:"tailscale_serve"`
+	Peers          []string         `toml:"peers"`
+	Agents         map[string]Agent `toml:"agents"`
 }
 
 // DefaultPort is the port the server listens on unless configured otherwise.
@@ -45,14 +46,15 @@ const DefaultPort = 8787
 // Default returns the built-in configuration.
 func Default() Config {
 	return Config{
-		Port:         DefaultPort,
-		TmuxSocket:   "nostromo",
-		DefaultAgent: "claude",
-		Repo:         "aist-dev/nostromo",
-		CheckUpdates: true,
-		AutoUpdate:   false,
-		AllowedUsers: []string{},
-		Peers:        []string{},
+		Port:           DefaultPort,
+		TmuxSocket:     "nostromo",
+		DefaultAgent:   "claude",
+		Repo:           "aist-dev/nostromo",
+		CheckUpdates:   true,
+		AutoUpdate:     false,
+		AllowedUsers:   []string{},
+		TailscaleServe: true,
+		Peers:          []string{},
 		Agents: map[string]Agent{
 			"claude": {
 				Start:  "claude --dangerously-skip-permissions --session-id {id}",
@@ -72,6 +74,7 @@ default_agent = "claude"
 repo = "aist-dev/nostromo"  # where releases come from
 check_updates = true        # ask GitHub for a new version once a day
 auto_update = false
+tailscale_serve = true      # the server sets up the HTTPS address with tailscale serve as soon as it can
 allowed_users = []          # Tailscale logins allowed to use the UI ("*" = anyone in the tailnet); empty = this machine only
 peers = []                  # other machines for the UI switcher, e.g. ["mac-mini", "linux-box"]
 
@@ -133,6 +136,9 @@ func merge(cfg *Config, file Config, md toml.MetaData) {
 	}
 	if md.IsDefined("allowed_users") {
 		cfg.AllowedUsers = file.AllowedUsers
+	}
+	if md.IsDefined("tailscale_serve") {
+		cfg.TailscaleServe = file.TailscaleServe
 	}
 	if md.IsDefined("peers") {
 		cfg.Peers = file.Peers

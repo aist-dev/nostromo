@@ -84,13 +84,19 @@ func Run(ctx context.Context, app *cli.App, listen string, ex Extras, stderr io.
 		Hostname: shortHostname(), Home: app.Env.Getenv("HOME"), Logger: logger,
 		Static: ex.Static, UpdateAvailable: ex.UpdateAvailable, StartUpdate: ex.StartUpdate,
 	}
-	if ts, err := tailscale.Find(); err == nil {
+	ts, tsErr := tailscale.Find()
+	if tsErr == nil {
 		opts.TailscaleStatus = ts.Status
 		if st, err := ts.Status(ctx); err == nil && st.HostName != "" {
 			opts.Hostname = st.HostName
 		}
 	}
 	srv := New(opts)
+	if app.Config.TailscaleServe && isLoopback(listen) {
+		find := func() (tailscale.API, error) { return tailscale.Find() }
+		h := &Healer{Find: find, ConfigPath: app.Paths.Config(), Port: app.Config.Port, Logger: logger, SetUsers: srv.SetAllowedUsers}
+		go h.Loop(ctx, time.Minute)
+	}
 	ln, err := net.Listen("tcp", listen)
 	if err != nil {
 		return err

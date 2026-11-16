@@ -1,6 +1,7 @@
 package setup
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
@@ -243,8 +244,8 @@ func TestSetupManualSteps(t *testing.T) {
 	if len(f.ts.served) != 0 {
 		t.Fatal("tailscale serve must not be called while HTTPS certificates are off")
 	}
-	if !strings.Contains(out, "then run: "+f.in.Paths.Binary()+" setup") {
-		t.Fatalf("hints must use the full path, an alias may still shadow agent:\n%s", out)
+	if strings.Contains(out, "then run:") || !strings.Contains(out, "finishes the HTTPS setup by itself") {
+		t.Fatalf("HTTPS steps must not ask to rerun setup:\n%s", out)
 	}
 	if _, err := os.Stat(filepath.Join(f.home, ".bashrc")); err == nil {
 		t.Fatal("PATH already contains ~/.local/bin: no rc edit expected")
@@ -278,7 +279,7 @@ func TestSetupTailscaleVariants(t *testing.T) {
 	f = newFixture(t)
 	f.ts.serveErr = errors.New("denied")
 	f.in.Setup(ctx, Options{})
-	if !strings.Contains(f.out.String(), "cannot read tailscale serve status") {
+	if !strings.Contains(f.out.String(), "tailscale serve: denied") {
 		t.Fatal(f.out.String())
 	}
 	// 443 taken by something else: use 8443; funnel on 8443 is reported.
@@ -302,7 +303,7 @@ func TestSetupTailscaleVariants(t *testing.T) {
 	f.in.GOOS = "darwin"
 	f.ts.setErr = errors.New("denied")
 	f.in.Setup(ctx, Options{})
-	if !strings.Contains(f.out.String(), "tailscale serve --bg --https=443 http://127.0.0.1:8787") {
+	if !strings.Contains(f.out.String(), "Tailscale app is running") {
 		t.Fatal(f.out.String())
 	}
 	f = newFixture(t)
@@ -311,6 +312,85 @@ func TestSetupTailscaleVariants(t *testing.T) {
 		t.Fatal("skipped steps ran")
 	}
 }
+
+func TestSetupInteractive(t *testing.T) {
+	ctx := context.Background()
+	// HTTPS off: setup waits for Enter, sees it on, continues. Operator missing:
+	// setup asks, runs sudo, retries. Linger refused: setup asks, runs sudo.
+	f := newFixture(t)
+	f.ts.status.MagicDNSEnabled = false
+	f.ts.setErr = errors.New("Access denied: serve config denied")
+	f.svc.lingerErr = errors.New("access denied")
+	var sudo []string
+	f.in.Sudo = func(_ context.Context, args ...string) error {
+		sudo = append(sudo, strings.Join(args, " "))
+		if args[0] == "tailscale" {
+			f.ts.setErr = nil
+		}
+		return nil
+	}
+	enter := 0
+	f.in.TTY = bufio.NewReader(readerFunc(func(p []byte) (int, error) {
+		enter++
+		if enter == 3 {
+			f.ts.status.MagicDNSEnabled = true // the user enabled it between two Enters
+		}
+		return copy(p, "\n"), nil
+	}))
+	if err := f.in.Setup(ctx, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	out := f.out.String()
+	if strings.Join(sudo, "|") != "loginctl enable-linger me|tailscale set --operator=me" {
+		t.Fatalf("sudo calls: %v\n%s", sudo, out)
+	}
+	if len(f.ts.served) != 1 || strings.Contains(out, "Left to do by hand") || !strings.Contains(out, "Still off") || !strings.Contains(out, "HTTPS certificates are on") {
+		t.Fatalf("interactive setup must finish everything:\n%s", out)
+	}
+	if _, err := os.Stat(f.in.lingerMarker()); err != nil {
+		t.Fatal("linger enabled through sudo must be remembered")
+	}
+
+	// The user declines everything: manual steps are listed, nothing is run.
+	f = newFixture(t)
+	f.ts.status.MagicDNSEnabled = false
+	f.svc.lingerErr = errors.New("denied")
+	f.in.Sudo = func(context.Context, ...string) error { t.Fatal("sudo without consent"); return nil }
+	f.in.TTY = bufio.NewReader(strings.NewReader("n\ns\n"))
+	f.in.Setup(ctx, Options{})
+	if !strings.Contains(f.out.String(), "sudo loginctl enable-linger me") || !strings.Contains(f.out.String(), "admin/dns") {
+		t.Fatal(f.out.String())
+	}
+	// Operator declined; sudo failing is reported.
+	f = newFixture(t)
+	f.ts.setErr = errors.New("denied")
+	f.in.TTY = bufio.NewReader(strings.NewReader("\n"))
+	f.in.Sudo = func(context.Context, ...string) error { return errors.New("wrong password") }
+	f.in.Setup(ctx, Options{NoService: true})
+	if !strings.Contains(f.out.String(), "sudo tailscale set: wrong password") {
+		t.Fatal(f.out.String())
+	}
+	// A closed terminal while waiting for HTTPS counts as skip.
+	f = newFixture(t)
+	f.ts.status.MagicDNSEnabled = false
+	f.in.TTY = bufio.NewReader(strings.NewReader(""))
+	f.in.Setup(ctx, Options{NoService: true})
+	if !strings.Contains(f.out.String(), "admin/dns") {
+		t.Fatal(f.out.String())
+	}
+	// The user keeps pressing Enter but never enables it.
+	f = newFixture(t)
+	f.ts.status.MagicDNSEnabled = false
+	f.in.TTY = bufio.NewReader(strings.NewReader(strings.Repeat("\n", 25)))
+	f.in.Setup(ctx, Options{NoService: true})
+	if strings.Count(f.out.String(), "Still off") != 20 {
+		t.Fatal("bounded wait")
+	}
+}
+
+type readerFunc func([]byte) (int, error)
+
+func (r readerFunc) Read(p []byte) (int, error) { return r(p) }
 
 func TestSetupUpgrade(t *testing.T) {
 	f := newFixture(t)
@@ -725,8 +805,9 @@ func TestNewInstaller(t *testing.T) {
 		t.Fatalf("%+v %v", in, err)
 	}
 	vars["NOSTROMO_SERVICE"] = "none"
-	if in, _ := NewInstaller(env); in.Service != nil {
-		t.Fatal("NOSTROMO_SERVICE=none must disable the service")
+	vars["NOSTROMO_TAILSCALE"] = "none"
+	if in, _ := NewInstaller(env); in.Service != nil || in.Tailscale != nil {
+		t.Fatal("NOSTROMO_SERVICE=none and NOSTROMO_TAILSCALE=none must disable them")
 	}
 	vars["NOSTROMO_HOME"] = ""
 	vars["HOME"] = ""

@@ -7,6 +7,10 @@
 #   scripts/test-install.sh --container checks run as a fresh user in a clean Ubuntu container (needs docker)
 set -euo pipefail
 
+# Every install and uninstall here runs with NOSTROMO_TAILSCALE=none: the throwaway
+# HOME uses the default port, and uninstall would otherwise remove the real
+# machine's tailscale serve config for that port.
+
 root="$(cd "$(dirname "$0")/.." && pwd)"
 version=0.0.7
 
@@ -44,7 +48,7 @@ checks() {
   out="$(mktemp)"
   run() {
     env -i HOME="$home" PATH="/usr/local/bin:/usr/bin:/bin" SHELL=/bin/bash USER="$(id -un)" \
-      NOSTROMO_SETUP_ARGS="--no-service --no-tailscale" "$@" bash "$root/install.sh" > "$out" 2>&1
+      NOSTROMO_NONINTERACTIVE=1 NOSTROMO_TAILSCALE=none NOSTROMO_SETUP_ARGS="--no-service --no-tailscale" "$@" bash "$root/install.sh" > "$out" 2>&1
   }
   mkdir -p "$home"
   printf "alias agent='claude --dangerously-skip-permissions'\n" > "$home/.bashrc"
@@ -78,7 +82,7 @@ source_check() {
   mkdir -p "$home"
   printf "alias agent='claude --dangerously-skip-permissions'\n" > "$home/.bashrc"
   env -i HOME="$home" PATH="$PATH" SHELL=/bin/bash USER="$(id -un)" GOCACHE="$(go env GOCACHE)" GOMODCACHE="$(go env GOMODCACHE)" \
-    NOSTROMO_SETUP_ARGS="--no-service --no-tailscale" bash "$root/install.sh" --source > "$out" 2>&1 || { cat "$out"; fail "source install failed"; }
+    NOSTROMO_TAILSCALE=none NOSTROMO_SETUP_ARGS="--no-service --no-tailscale" bash "$root/install.sh" --source > "$out" 2>&1 || { cat "$out"; fail "source install failed"; }
   [ -x "$home/.nostromo/bin/agent" ] || fail "source build not installed"
   [ "$(readlink "$home/.local/bin/agent")" = "$home/.nostromo/bin/agent" ] || fail "symlink missing after source install"
   grep -q '^# nostromo: disabled alias agent=' "$home/.bashrc" || fail "alias not disabled by source install"
@@ -99,7 +103,7 @@ cycle_check() {
   cp "$home/.bashrc" "$home/bashrc.orig"
   sh_env() {
     env -i HOME="$home" PATH="/usr/local/bin:/usr/bin:/bin" SHELL=/bin/bash USER="$(id -un)" \
-      NOSTROMO_SERVICE=none NOSTROMO_SETUP_ARGS="--no-service --no-tailscale" NOSTROMO_DOWNLOAD_URL="$good" "$@" > "$out" 2>&1
+      NOSTROMO_SERVICE=none NOSTROMO_TAILSCALE=none NOSTROMO_SETUP_ARGS="--no-service --no-tailscale" NOSTROMO_DOWNLOAD_URL="$good" "$@" > "$out" 2>&1
   }
   installed() {
     [ "$(readlink "$home/.local/bin/agent")" = "$home/.nostromo/bin/agent" ] &&

@@ -4,7 +4,8 @@ Every version notes whether it migrates stored data (chat records or config).
 
 ## Unreleased
 
-- Setup and doctor print the full path in "rerun setup" hints (`~/.nostromo/bin/agent setup`), because right after the first install `agent` in an open terminal can still be an old alias.
+- No more "rerun agent setup": in a terminal the installer asks before running `sudo tailscale set --operator` and `sudo loginctl enable-linger`, and waits while you enable HTTPS certificates. Without a terminal it lists the steps, and the server finishes the HTTPS setup by itself within a minute after they are done (new config key `tailscale_serve`, default `true`).
+- Hints that still need setup (repairs from `agent doctor`) print its full path, `~/.nostromo/bin/agent setup`.
 - The project is licensed under MIT.
 
 Data migration: none.
