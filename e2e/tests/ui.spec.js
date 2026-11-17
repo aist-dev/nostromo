@@ -118,3 +118,47 @@ test("copying a terminal selection", async ({ page, context, isMobile }) => {
   await page.locator("#act-delete").click();
   await expect(page.locator(".chat")).toHaveCount(0);
 });
+
+test("pasting into the terminal", async ({ page, context, isMobile }) => {
+  test.skip(isMobile, "Ctrl+V is a keyboard gesture");
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  // Record what the terminal sends to tmux.
+  await page.addInitScript(() => {
+    const w = /** @type {any} */ (window);
+    w.sent = [];
+    const send = WebSocket.prototype.send;
+    WebSocket.prototype.send = function (d) {
+      if (d instanceof Uint8Array) w.sent.push(new TextDecoder().decode(d));
+      return send.call(this, d);
+    };
+  });
+  const sent = () => page.evaluate(() => /** @type {any} */ (window).sent.join(""));
+  const reset = () => page.evaluate(() => { /** @type {any} */ (window).sent = []; });
+
+  await page.goto("/");
+  await page.locator("#new-chat").click();
+  await page.locator("#path-input").fill(project());
+  await page.locator("#path-input").press("Enter");
+  await expect(page.locator("#dir-path")).toContainText(project());
+  await page.locator("#new-create").click();
+  await expect.poll(() => terminalText(page)).toContain("fakeagent ready>");
+  await page.locator("#terminal").click();
+
+  // Ctrl+V pastes the browser clipboard as a bracketed paste, not ^V.
+  await page.evaluate(() => navigator.clipboard.writeText("pasted-text"));
+  await reset();
+  await page.keyboard.press("Control+V");
+  await expect.poll(sent).toBe("\x1b[200~pasted-text\x1b[201~");
+
+  // A paste without text (an image) becomes ^V, for the agent's own clipboard reading.
+  await reset();
+  await page.evaluate(() => {
+    const ev = new ClipboardEvent("paste", { clipboardData: new DataTransfer(), bubbles: true, cancelable: true });
+    document.querySelector("#terminal textarea")?.dispatchEvent(ev);
+  });
+  await expect.poll(sent).toBe("\x16");
+
+  page.once("dialog", (d) => d.accept());
+  await page.locator("#act-delete").click();
+  await expect(page.locator(".chat")).toHaveCount(0);
+});

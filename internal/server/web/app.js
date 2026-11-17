@@ -163,6 +163,7 @@
   }
 
   // ---------- main view ----------
+  const isMac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
   const isPhone = () => window.matchMedia("(max-width: 899px)").matches;
 
   function renderMain() {
@@ -312,8 +313,22 @@
           clip.copy(xterm.getSelection());
           return false;
         }
+        // xterm.js turns Ctrl+V into ^V and cancels the browser paste. Outside macOS
+        // (where Cmd+V pastes) let the browser paste instead.
+        if (e.type === "keydown" && e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey && e.code === "KeyV" && !isMac) {
+          return false;
+        }
         return true;
       });
+      // A paste without text (an image, say) becomes ^V, so an agent on this machine can
+      // read the clipboard itself, as Claude Code does for images. Capture runs before
+      // xterm.js, which would otherwise send an empty bracketed paste.
+      $("terminal").addEventListener("paste", (e) => {
+        if (e.clipboardData && e.clipboardData.getData("text/plain")) return;
+        e.preventDefault();
+        e.stopPropagation();
+        send("\x16");
+      }, true);
       // Right click belongs to tmux (its pane menu), not to the browser.
       $("terminal").addEventListener("contextmenu", (e) => e.preventDefault());
       new ResizeObserver(() => resize()).observe($("terminal"));
