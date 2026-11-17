@@ -106,7 +106,7 @@ Detach from a chat with the tmux prefix `Ctrl-b d`; the agent keeps running. Run
 
 Chats run on their own tmux socket, so they do not show up in a plain `tmux ls`; use `agent ls` or `tmux -L nostromo ls`.
 
-In the browser, open the address printed by setup (`https://<machine>.<tailnet>.ts.net`). On a phone, the bottom bar has Esc, Tab, Ctrl+C, arrows and history scrolling, and the input line supports autocorrect and dictation.
+In the browser, open the address printed by setup (`https://<machine>.<tailnet>.ts.net`). On a phone, swipe up and down over the terminal to scroll the history (a fling keeps scrolling), the bottom bar has Esc, Tab, Ctrl+C, arrows and history scrolling, and the input line supports autocorrect and dictation.
 
 To copy from a chat in the browser, select with the mouse: on release the text is on the clipboard (tmux copies it, so the selection may run into the scrollback). Shift+drag (Option+drag on macOS) selects only the visible screen, without tmux; it is copied on release and with Ctrl+Shift+C. Right click opens the tmux menu (its Copy Word and Copy Line fill only the tmux buffer, for pasting inside tmux). If the browser refuses the clipboard, a toast offers a Copy button.
 

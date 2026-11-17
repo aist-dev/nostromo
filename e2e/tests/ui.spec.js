@@ -162,3 +162,48 @@ test("pasting into the terminal", async ({ page, context, isMobile }) => {
   await page.locator("#act-delete").click();
   await expect(page.locator(".chat")).toHaveCount(0);
 });
+
+test("swiping scrolls the terminal on a phone", async ({ page, isMobile }) => {
+  test.skip(!isMobile, "touch gesture");
+  await page.addInitScript(() => {
+    const w = /** @type {any} */ (window);
+    w.sent = [];
+    const send = WebSocket.prototype.send;
+    WebSocket.prototype.send = function (d) {
+      if (d instanceof Uint8Array) w.sent.push(new TextDecoder().decode(d));
+      return send.call(this, d);
+    };
+  });
+  const sent = () => page.evaluate(() => /** @type {any} */ (window).sent.join(""));
+
+  await page.goto("/");
+  await page.locator("#menu-btn").click();
+  await page.locator("#new-chat").click();
+  await page.locator("#path-input").fill(project());
+  await page.locator("#path-input").press("Enter");
+  await expect(page.locator("#dir-path")).toContainText(project());
+  await page.locator("#new-create").click();
+  await expect.poll(() => terminalText(page)).toContain("fakeagent ready>");
+
+  // Drag a finger down the terminal: tmux gets wheel-up reports and enters copy mode.
+  await page.evaluate(() => {
+    const el = /** @type {HTMLElement} */ (document.querySelector("#terminal .xterm-screen"));
+    const r = el.getBoundingClientRect();
+    const x = r.left + r.width / 2;
+    const at = (y) => [new Touch({ identifier: 1, target: el, clientX: x, clientY: y })];
+    const fire = (type, y) => el.dispatchEvent(new TouchEvent(type, {
+      touches: type === "touchend" ? [] : at(y), changedTouches: at(y), bubbles: true, cancelable: true,
+    }));
+    const top = r.top + 20;
+    fire("touchstart", top);
+    for (let i = 1; i <= 20; i++) fire("touchmove", top + i * 12);
+    fire("touchend", top + 240);
+  });
+  await expect.poll(sent).toMatch(/\x1b\[<64;\d+;\d+M/);
+  await expect.poll(sent).not.toMatch(/\x1b\[<65;/);
+  await expect.poll(() => terminalText(page)).toMatch(/\[\d+\/\d+\]/);
+
+  page.once("dialog", (d) => d.accept());
+  await page.locator("#act-delete").click();
+  await expect(page.locator(".chat")).toHaveCount(0);
+});

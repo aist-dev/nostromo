@@ -329,9 +329,67 @@
         e.stopPropagation();
         send("\x16");
       }, true);
+      touchScroll($("terminal"));
       // Right click belongs to tmux (its pane menu), not to the browser.
       $("terminal").addEventListener("contextmenu", (e) => e.preventDefault());
       new ResizeObserver(() => resize()).observe($("terminal"));
+    }
+
+    // With tmux mouse on, xterm.js ignores touch moves (it only scrolls its own buffer,
+    // and only without mouse reporting). Turn a vertical swipe into wheel events, which
+    // xterm.js encodes for tmux like a desktop wheel; a fling keeps going and slows down.
+    function touchScroll(box) {
+      const TICK = 2.5; // rows of finger travel per wheel step (tmux scrolls a few lines)
+      let lastY = 0, lastT = 0, x = 0, y = 0, acc = 0, vel = 0, swiping = false, startY = 0, fling = 0;
+      const rowPx = () => box.querySelector(".xterm-rows > div")?.getBoundingClientRect().height || 16;
+      const wheel = (dir) => {
+        const target = box.querySelector(".xterm-screen");
+        if (!target) return;
+        target.dispatchEvent(new WheelEvent("wheel", {
+          deltaY: dir, deltaMode: WheelEvent.DOM_DELTA_LINE, clientX: x, clientY: y, bubbles: true, cancelable: true,
+        }));
+      };
+      // Finger moving up shows later text: that is a wheel down.
+      const move = (dy) => {
+        acc += dy;
+        const step = rowPx() * TICK;
+        while (Math.abs(acc) >= step) {
+          wheel(acc > 0 ? -1 : 1);
+          acc -= Math.sign(acc) * step;
+        }
+      };
+      box.addEventListener("touchstart", (e) => {
+        cancelAnimationFrame(fling);
+        if (e.touches.length !== 1) return;
+        const t = e.touches[0];
+        x = t.clientX; y = startY = lastY = t.clientY; lastT = e.timeStamp; acc = 0; vel = 0; swiping = false;
+      }, { capture: true, passive: true });
+      box.addEventListener("touchmove", (e) => {
+        if (e.touches.length !== 1) return;
+        const t = e.touches[0];
+        if (!swiping && Math.abs(t.clientY - startY) < 8) return;
+        swiping = true;
+        e.preventDefault();
+        e.stopPropagation();
+        const dy = t.clientY - lastY, dt = Math.max(1, e.timeStamp - lastT);
+        vel = 0.8 * (dy / dt) + 0.2 * vel;
+        lastY = t.clientY; lastT = e.timeStamp;
+        move(dy);
+      }, { capture: true, passive: false });
+      box.addEventListener("touchend", () => {
+        if (!swiping) return;
+        swiping = false;
+        let prev = performance.now();
+        const step = (now) => {
+          const dt = now - prev;
+          prev = now;
+          vel *= Math.pow(0.995, dt);
+          if (Math.abs(vel) < 0.05) return;
+          move(vel * dt);
+          fling = requestAnimationFrame(step);
+        };
+        fling = requestAnimationFrame(step);
+      }, { capture: true, passive: true });
     }
 
     function send(data) {
