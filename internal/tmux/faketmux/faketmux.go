@@ -24,7 +24,7 @@ type Fake struct {
 	Sessions map[string]*Session
 	Ver      string
 	Calls    []string
-	Errs     map[string]error // per method name: Version, NewSession, ListPanes, KillSession, Scroll, SwitchClient
+	Errs     map[string]error // per method name: Version, NewSession, ListPanes, KillSession, Scroll, SwitchClient, SourceFile
 	Switched []string
 	Scrolls  []string
 	// AttachCmd, when set, replaces the argv returned by AttachArgs.
@@ -170,7 +170,9 @@ func (f *Fake) Capture(_ context.Context, name string) (string, error) {
 	return f.Screen, nil
 }
 
-// SourceFile records the call; the fake has no configuration.
+// SourceFile implements tmux.API; the fake only records the call.
 func (f *Fake) SourceFile(context.Context, string) error {
-	return f.call("source-file")
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.call("SourceFile")
 }

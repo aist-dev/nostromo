@@ -5,7 +5,7 @@ Every version notes whether it migrates stored data (chat records or config).
 ## Unreleased
 
 - Copying from the browser terminal works: a mouse selection (copied by tmux via OSC 52) lands on the clipboard with a "Copied" toast, and so do the agent's own clipboard writes. Shift+drag (Option+drag on macOS) selects in the browser without tmux and copies on release or with Ctrl+Shift+C. Right click shows only the tmux menu, not the browser's as well.
-- `~/.nostromo/tmux.conf` is rewritten when it differs from the current version (it gains `set-clipboard on`), and a running tmux server reloads it, so open chats pick it up without a restart.
+- `~/.nostromo/tmux.conf` gains `set-clipboard on`. Reinstalling (and starting the server) rewrites it when it differs from the current version and reloads it into the running tmux server, so open chats pick it up without a restart.
 
 Data migration: none.
 

@@ -102,7 +102,7 @@ func (in *Installer) target(cfg config.Config) string {
 func (in *Installer) Setup(ctx context.Context, o Options) error {
 	r := &report{out: in.Out}
 	r.step("Files")
-	newBinary, err := in.files(o, r)
+	newBinary, err := in.files(ctx, o, r)
 	if err != nil {
 		return err
 	}
@@ -169,7 +169,7 @@ func (in *Installer) Setup(ctx context.Context, o Options) error {
 // files creates the home directory and installs the running binary. It reports
 // whether the installed binary is new since the service last started, which is
 // always the case when setup runs from it (install.sh puts it in place first).
-func (in *Installer) files(o Options, r *report) (bool, error) {
+func (in *Installer) files(ctx context.Context, o Options, r *report) (bool, error) {
 	if err := os.MkdirAll(in.Paths.Home, 0o700); err != nil {
 		return false, err
 	}
@@ -187,8 +187,13 @@ func (in *Installer) files(o Options, r *report) (bool, error) {
 		}
 		r.ok("wrote %s", in.Paths.Config())
 	}
-	if _, err := writeIfChanged(in.Paths.TmuxConf(), tmux.Conf); err != nil {
+	if changed, err := writeIfChanged(in.Paths.TmuxConf(), tmux.Conf); err != nil {
 		return false, err
+	} else if changed && in.Tmux != nil {
+		// Running chats keep their tmux server: bring it up to the new config.
+		if err := in.Tmux.SourceFile(ctx, in.Paths.TmuxConf()); err != nil {
+			r.warn("reload tmux config: %v", err)
+		}
 	}
 	if !o.Upgrade && in.Exe != "" && in.Exe != in.Paths.Binary() {
 		data, err := os.ReadFile(in.Exe)

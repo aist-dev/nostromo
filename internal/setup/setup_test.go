@@ -421,6 +421,39 @@ func TestSetupUpgrade(t *testing.T) {
 	}
 }
 
+func TestSetupReloadsChangedTmuxConf(t *testing.T) {
+	f := newFixture(t)
+	count := func() int {
+		n := 0
+		for _, c := range f.tm.Calls {
+			if c == "SourceFile" {
+				n++
+			}
+		}
+		return n
+	}
+	if err := f.in.Setup(context.Background(), Options{}); err != nil {
+		t.Fatal(err)
+	}
+	if count() != 1 {
+		t.Fatalf("a new tmux.conf must be loaded: %v", f.tm.Calls)
+	}
+	if err := f.in.Setup(context.Background(), Options{}); err != nil {
+		t.Fatal(err)
+	}
+	if count() != 1 {
+		t.Fatalf("an unchanged tmux.conf must not be reloaded: %v", f.tm.Calls)
+	}
+	write(t, f.in.Paths.TmuxConf(), "set -g mouse on\n")
+	f.tm.Errs["SourceFile"] = errors.New("boom")
+	if err := f.in.Setup(context.Background(), Options{}); err != nil {
+		t.Fatal(err)
+	}
+	if count() != 2 || !strings.Contains(f.out.String(), "reload tmux config: boom") {
+		t.Fatalf("a failed reload is a warning:\n%s", f.out)
+	}
+}
+
 func TestSetupStops(t *testing.T) {
 	ctx := context.Background()
 	f := newFixture(t)
