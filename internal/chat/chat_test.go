@@ -124,13 +124,29 @@ func TestEnsureTmuxConfError(t *testing.T) {
 	os.MkdirAll(e.svc.Paths.Home, 0o755)
 	// tmux.conf path occupied by a non-empty directory cannot be written.
 	os.MkdirAll(filepath.Join(e.svc.Paths.TmuxConf()), 0o755)
-	if err := e.svc.EnsureTmuxConf(); err != nil {
-		t.Fatalf("existing path counts as present: %v", err)
+	if changed, err := e.svc.EnsureTmuxConf(); err != nil || changed {
+		t.Fatalf("a directory in place is left alone: %v %v", changed, err)
 	}
 	e.svc.Paths.Home = filepath.Join(e.cwd, "file")
 	os.WriteFile(e.svc.Paths.Home, nil, 0o644)
 	if _, err := e.svc.Start(context.Background(), StartOptions{Cwd: e.cwd}); err == nil {
 		t.Fatal("unwritable home must fail")
+	}
+}
+
+func TestEnsureTmuxConfRewritesOutdated(t *testing.T) {
+	e := setup(t)
+	os.MkdirAll(e.svc.Paths.Home, 0o755)
+	p := e.svc.Paths.TmuxConf()
+	os.WriteFile(p, []byte("set -g mouse on\n"), 0o644)
+	if changed, err := e.svc.EnsureTmuxConf(); err != nil || !changed {
+		t.Fatalf("outdated config must be rewritten: %v %v", changed, err)
+	}
+	if b, _ := os.ReadFile(p); string(b) != tmux.Conf {
+		t.Fatalf("config = %q", b)
+	}
+	if changed, err := e.svc.EnsureTmuxConf(); err != nil || changed {
+		t.Fatalf("current config must be kept: %v %v", changed, err)
 	}
 }
 

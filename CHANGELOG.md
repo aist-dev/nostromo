@@ -2,6 +2,13 @@
 
 Every version notes whether it migrates stored data (chat records or config).
 
+## Unreleased
+
+- Copying from the browser terminal works: a mouse selection (copied by tmux via OSC 52) lands on the clipboard with a "Copied" toast, and so do the agent's own clipboard writes. Shift+drag (Option+drag on macOS) selects in the browser without tmux and copies on release or with Ctrl+Shift+C. Right click shows only the tmux menu, not the browser's as well.
+- `~/.nostromo/tmux.conf` is rewritten when it differs from the current version (it gains `set-clipboard on`), and a running tmux server reloads it, so open chats pick it up without a restart.
+
+Data migration: none.
+
 ## 0.2.0 — 2026-11-17
 
 - **Breaking:** the launcher flags are now `--nostr-agent`, `--nostr-cwd`, `--nostr-title` and `--nostr-detach`, so they never collide with an agent's flags (Claude's `-d` is `--debug`). The old `--cwd`, `--title` and `--detach` stop with a hint; `-a` and `-d` now go to the agent.

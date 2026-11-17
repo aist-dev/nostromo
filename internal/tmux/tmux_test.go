@@ -231,6 +231,24 @@ func TestKillSessionAndServer(t *testing.T) {
 	}
 }
 
+func TestSourceFile(t *testing.T) {
+	c, r := newFake()
+	if err := c.SourceFile(context.Background(), "/h/tmux.conf"); err != nil {
+		t.Fatal(err)
+	}
+	if got := r.calls[0].args[len(r.calls[0].args)-1]; got != "/h/tmux.conf" {
+		t.Fatalf("path: %s", got)
+	}
+	r.errs["source-file"] = "no server running on x"
+	if err := c.SourceFile(context.Background(), "/h/tmux.conf"); err != nil {
+		t.Fatal(err)
+	}
+	r.errs["source-file"] = "boom"
+	if err := c.SourceFile(context.Background(), "/h/tmux.conf"); err == nil {
+		t.Fatal("expected error")
+	}
+}
+
 func TestSwitchAndAttach(t *testing.T) {
 	c, r := newFake()
 	if err := c.SwitchClient(context.Background(), "agent-1"); err != nil {

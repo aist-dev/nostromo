@@ -230,6 +230,49 @@
     render();
   }
 
+  // ---------- clipboard ----------
+  const clip = {
+    decode(b64) {
+      try {
+        return new TextDecoder().decode(Uint8Array.from(atob(b64), (ch) => ch.charCodeAt(0)));
+      } catch (_) { return ""; }
+    },
+    // The legacy path works over plain HTTP too, but only inside a user gesture.
+    legacy(text) {
+      const ta = el("textarea");
+      ta.value = text;
+      ta.setAttribute("readonly", "");
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      let ok = false;
+      try { ok = document.execCommand("copy"); } catch (_) { /* unsupported */ }
+      ta.remove();
+      return ok;
+    },
+    done(text) {
+      const lines = text.split("\n").length;
+      toast("Copied " + (lines > 1 ? lines + " lines" : text.length + " characters"));
+    },
+    async copy(text) {
+      if (!text) return;
+      try {
+        await navigator.clipboard.writeText(text);
+        clip.done(text);
+        return;
+      } catch (_) { /* no Clipboard API here, or no recent user gesture */ }
+      // Copy from the button click, which is a gesture every browser accepts.
+      toast("Selection ready", () => {
+        const write = navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject();
+        write.then(() => clip.done(text), () => {
+          if (clip.legacy(text)) clip.done(text);
+          else toast("The browser refused the clipboard");
+        });
+      }, "Copy");
+    },
+  };
+
   // ---------- terminal ----------
   const term = (function () {
     let xterm = null, fit = null, ws = null, chatId = "", mode = "", retry = 0, retryTimer = null, wanted = false;
@@ -244,12 +287,35 @@
         scrollback: 5000,
         allowProposedApi: false,
         theme: { background: "#101114" },
+        macOptionClickForcesSelection: true,
       });
       fit = new FitAddon.FitAddon();
       xterm.loadAddon(fit);
       xterm.open($("terminal"));
       xterm.onData((d) => send(d));
       xterm.onBinary((d) => send(d));
+      // tmux hands a mouse selection (and the agent's own copies) to the terminal as
+      // OSC 52 "<target>;<base64>"; xterm.js leaves the clipboard to the page.
+      xterm.parser.registerOscHandler(52, (data) => {
+        const b64 = data.slice(data.indexOf(";") + 1);
+        if (b64 && b64 !== "?") clip.copy(clip.decode(b64));
+        return true;
+      });
+      // Shift+drag (Option+drag on macOS) selects in the browser, past tmux: copy it on
+      // release, and on Ctrl+Shift+C.
+      $("terminal").addEventListener("mouseup", () => {
+        if (xterm.hasSelection()) clip.copy(xterm.getSelection());
+      });
+      xterm.attachCustomKeyEventHandler((e) => {
+        if (e.type === "keydown" && e.ctrlKey && e.shiftKey && e.code === "KeyC" && xterm.hasSelection()) {
+          e.preventDefault();
+          clip.copy(xterm.getSelection());
+          return false;
+        }
+        return true;
+      });
+      // Right click belongs to tmux (its pane menu), not to the browser.
+      $("terminal").addEventListener("contextmenu", (e) => e.preventDefault());
       new ResizeObserver(() => resize()).observe($("terminal"));
     }
 
@@ -388,8 +454,9 @@
   }
 
   let toastTimer = null;
-  function toast(text, undo) {
+  function toast(text, undo, label) {
     $("toast-text").textContent = text;
+    $("toast-undo").textContent = label || "Undo";
     $("toast-undo").hidden = !undo;
     $("toast-undo").onclick = () => { hideToast(); if (undo) undo(); };
     $("toast").hidden = false;

@@ -75,8 +75,13 @@ func Run(ctx context.Context, app *cli.App, listen string, ex Extras, stderr io.
 	if len(app.Config.AllowedUsers) == 0 {
 		logger.Printf("allowed_users is empty: only this machine can use the UI (http://127.0.0.1:%d); it is filled in once the HTTPS address is set up, or set allowed_users in %s", app.Config.Port, app.Paths.Config())
 	}
-	if err := app.Chats.EnsureTmuxConf(); err != nil {
+	if changed, err := app.Chats.EnsureTmuxConf(); err != nil {
 		return err
+	} else if changed {
+		// Chats outlive the server: bring a running tmux up to the new config.
+		if err := app.Chats.Tmux.SourceFile(ctx, app.Paths.TmuxConf()); err != nil {
+			logger.Printf("reload tmux config: %v", err)
+		}
 	}
 
 	opts := Options{

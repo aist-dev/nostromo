@@ -31,6 +31,8 @@ set -g escape-time 10
 set -g status off
 set -g set-titles off
 set -g focus-events on
+# Copies (mouse selection, OSC 52 from the agent) reach the browser clipboard.
+set -g set-clipboard on
 set -ga terminal-overrides ",xterm-256color:Tc"
 `
 
@@ -82,6 +84,7 @@ type API interface {
 	AttachArgs(name string) []string
 	SwitchClient(ctx context.Context, name string) error
 	Capture(ctx context.Context, name string) (string, error)
+	SourceFile(ctx context.Context, path string) error
 }
 
 // Client talks to one tmux server, selected by socket name.
@@ -327,6 +330,16 @@ func (c *Client) KillSession(ctx context.Context, name string) error {
 // KillServer stops the whole tmux server on this socket.
 func (c *Client) KillServer(ctx context.Context) error {
 	_, err := c.run(ctx, "kill-server")
+	if err != nil && noServer(err) {
+		return nil
+	}
+	return err
+}
+
+// SourceFile reloads a config file into a running server. No server is not an error:
+// the next server reads the file on start.
+func (c *Client) SourceFile(ctx context.Context, path string) error {
+	_, err := c.run(ctx, "source-file", path)
 	if err != nil && noServer(err) {
 		return nil
 	}

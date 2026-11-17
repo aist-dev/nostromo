@@ -169,3 +169,8 @@ func (f *Fake) Capture(_ context.Context, name string) (string, error) {
 	}
 	return f.Screen, nil
 }
+
+// SourceFile records the call; the fake has no configuration.
+func (f *Fake) SourceFile(context.Context, string) error {
+	return f.call("source-file")
+}

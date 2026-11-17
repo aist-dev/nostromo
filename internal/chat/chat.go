@@ -95,13 +95,20 @@ func (s *Service) agent(name string) (config.Agent, string, error) {
 	return a, name, nil
 }
 
-// EnsureTmuxConf writes the nostromo tmux config if it is missing.
-func (s *Service) EnsureTmuxConf() error {
+// EnsureTmuxConf writes the nostromo tmux config if it is missing or outdated, and
+// reports whether it wrote it. A directory in its place is left alone.
+func (s *Service) EnsureTmuxConf() (bool, error) {
 	p := s.Paths.TmuxConf()
-	if _, err := os.Stat(p); err == nil {
-		return nil
+	if fi, err := os.Stat(p); err == nil && fi.IsDir() {
+		return false, nil
 	}
-	return config.WriteFileAtomic(p, []byte(tmux.Conf), 0o644)
+	if b, err := os.ReadFile(p); err == nil && string(b) == tmux.Conf {
+		return false, nil
+	}
+	if err := config.WriteFileAtomic(p, []byte(tmux.Conf), 0o644); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (s *Service) launch(ctx context.Context, r store.Record, a config.Agent, resume bool, args []string, cols, rows int) error {
@@ -116,7 +123,7 @@ func (s *Service) launch(ctx context.Context, r store.Record, a config.Agent, re
 			return fmt.Errorf("store the agent arguments: %w", err)
 		}
 	}
-	if err := s.EnsureTmuxConf(); err != nil {
+	if _, err := s.EnsureTmuxConf(); err != nil {
 		return err
 	}
 	spec := tmux.SessionSpec{

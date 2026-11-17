@@ -69,3 +69,52 @@ test("chat lifecycle in the browser", async ({ page, isMobile }) => {
 
   expect(errors).toEqual([]);
 });
+
+test("copying a terminal selection", async ({ page, context, isMobile }) => {
+  test.skip(isMobile, "mouse selection is a desktop gesture");
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  const readClipboard = () => page.evaluate(() => navigator.clipboard.readText());
+
+  await page.goto("/");
+  await page.locator("#new-chat").click();
+  await page.locator("#path-input").fill(project());
+  await page.locator("#path-input").press("Enter");
+  await expect(page.locator("#dir-path")).toContainText(project());
+  await page.locator("#new-create").click();
+  await expect.poll(() => terminalText(page)).toContain("fakeagent ready>");
+
+  // Drag across the first line: tmux selects it and sends it back as OSC 52.
+  const box = await page.locator("#terminal .xterm-screen").boundingBox();
+  if (!box) throw new Error("no terminal");
+  const row = await page.locator("#terminal .xterm-rows > div").first().boundingBox();
+  if (!row) throw new Error("no row");
+  const y = row.y + row.height / 2;
+  await page.mouse.move(box.x + 2, y);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2, y, { steps: 10 });
+  await page.mouse.up();
+  await expect(page.locator("#toast-text")).toContainText("Copied");
+  await expect.poll(readClipboard).toContain("fakeagent");
+
+  // Shift+drag selects in the browser, past tmux, and copies on release.
+  await page.evaluate(() => navigator.clipboard.writeText(""));
+  await page.keyboard.down("Shift");
+  await page.mouse.move(box.x + 2, y);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2, y, { steps: 10 });
+  await page.mouse.up();
+  await page.keyboard.up("Shift");
+  await expect.poll(readClipboard).toContain("fakeagent");
+
+  // Right click opens only the tmux menu: the browser menu is suppressed.
+  const prevented = await page.evaluate(() => {
+    const ev = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+    document.querySelector("#terminal .xterm-screen").dispatchEvent(ev);
+    return ev.defaultPrevented;
+  });
+  expect(prevented).toBe(true);
+
+  page.once("dialog", (d) => d.accept());
+  await page.locator("#act-delete").click();
+  await expect(page.locator(".chat")).toHaveCount(0);
+});
