@@ -34,6 +34,8 @@ set -g focus-events on
 # Copies (mouse selection, OSC 52 from the agent) reach the browser clipboard.
 set -g set-clipboard on
 set -ga terminal-overrides ",xterm-256color:Tc"
+# Pass hyperlinks (OSC 8) from the agent to the browser and other xterm-like terminals.
+set -as terminal-features ",xterm*:hyperlinks"
 `
 
 // ErrNoSession is returned when the target session does not exist.

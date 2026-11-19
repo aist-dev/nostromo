@@ -5,6 +5,7 @@ package tmux_test
 import (
 	"context"
 	"errors"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -82,5 +83,23 @@ func TestRealTmuxSessionLifecycle(t *testing.T) {
 	}
 	if err := c.KillServer(ctx); err != nil {
 		t.Fatalf("kill without server: %v", err)
+	}
+}
+
+func TestRealTmuxPassesHyperlinks(t *testing.T) {
+	ctx := context.Background()
+	home := t.TempDir()
+	c := testutil.Tmux(t, home)
+	agent := testutil.FakeAgent(t)
+	spec := tmux.SessionSpec{Name: "agent-test0003", ChatID: "test0003-full", Cwd: home, Command: adapter.ShellQuote(agent)}
+	if err := c.NewSession(ctx, spec); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command("tmux", append(c.BaseArgs(), "show", "-g", "terminal-features")...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("%v: %s", err, out)
+	}
+	if !strings.Contains(string(out), "xterm*:hyperlinks") {
+		t.Fatalf("hyperlinks are not enabled for xterm clients:\n%s", out)
 	}
 }

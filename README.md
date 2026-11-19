@@ -110,7 +110,7 @@ In the browser, open the address printed by setup (`https://<machine>.<tailnet>.
 
 To copy from a chat in the browser, select with the mouse: on release the text is on the clipboard (tmux copies it, so the selection may run into the scrollback). Shift+drag (Option+drag on macOS) selects only the visible screen, without tmux; it is copied on release and with Ctrl+Shift+C. Right click opens the tmux menu (its Copy Word and Copy Line fill only the tmux buffer, for pasting inside tmux). If the browser refuses the clipboard, a toast offers a Copy button.
 
-Ctrl+V (Cmd+V on macOS) pastes the browser clipboard into the chat. When the clipboard holds no text, for example an image, the agent gets Ctrl+V itself, so Claude Code can still paste an image from the clipboard of the machine it runs on.
+Links the agent prints as hyperlinks open on click (the browser asks first). Ctrl+V (Cmd+V on macOS) pastes the browser clipboard into the chat. When the clipboard holds no text, for example an image, the agent gets Ctrl+V itself, so Claude Code can still paste an image from the clipboard of the machine it runs on.
 
 Deleting a chat removes only nostromo's record. The agent's own history stays where the agent keeps it (for Claude Code, `claude --resume` still finds it).
 
